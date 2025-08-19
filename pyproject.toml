@@ -1,0 +1,10 @@
+
+[build-system]
+requires = ["setuptools", "wheel"]
+
+[project]
+name = "nextcloud-wrapper"
+version = "0.1.0"
+description = "Wrapper Python per gestire rclone, WebDAV e quote multiutente"
+authors = [{name="Your Name", email="you@example.com"}]
+dependencies = ["typer"]
