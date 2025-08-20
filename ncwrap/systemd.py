@@ -245,10 +245,33 @@ class SystemdManager:
     
     def _generate_mount_service_config(self, remote_name: str, mount_point: str, 
                                      user: str, profile: str = "writes") -> str:
-        """Genera configurazione servizio mount con profilo specifico"""
+        """Genera configurazione servizio mount con profilo specifico e path assoluti"""
         from . import rclone  # Import locale
         
         config_path = rclone.RCLONE_CONF
+        
+        # Rileva path Python e nextcloud-wrapper nel venv attivo
+        import sys
+        import subprocess
+        
+        python_path = sys.executable
+        
+        # Trova nextcloud-wrapper nel venv
+        try:
+            nw_result = subprocess.run([python_path, '-c', 'import nextcloud_wrapper; print(nextcloud_wrapper.__file__)'], 
+                                     capture_output=True, text=True)
+            if nw_result.returncode == 0:
+                # Usa python -m per eseguire il modulo
+                exec_command = f"{python_path} -m ncwrap.cli"
+            else:
+                # Fallback: prova a trovare nextcloud-wrapper script
+                nw_which = subprocess.run(['which', 'nextcloud-wrapper'], capture_output=True, text=True)
+                if nw_which.returncode == 0:
+                    exec_command = nw_which.stdout.strip()
+                else:
+                    exec_command = f"{python_path} -c 'from ncwrap.cli import app; app()'"
+        except:
+            exec_command = f"{python_path} -c 'from ncwrap.cli import app; app()'"
         
         # Opzioni per profilo
         profile_options = {
@@ -258,6 +281,9 @@ class SystemdManager:
         }
         
         mount_options = profile_options.get(profile, profile_options["writes"])
+        
+        # Path assoluto per rclone
+        rclone_path = "/usr/local/bin/rclone"  # Path standard dopo installazione
         
         return f"""[Unit]
 Description=RClone mount for {remote_name} -> {mount_point} (profile: {profile})
@@ -269,8 +295,10 @@ AssertPathIsDirectory={mount_point}
 Type=notify
 User={user}
 Group={user}
+Environment=PYTHONPATH=/root/src/nextcloud-wrapper
+WorkingDirectory=/root/src/nextcloud-wrapper
 ExecStartPre=/bin/mkdir -p {mount_point}
-ExecStart=/usr/bin/rclone mount {remote_name}:/ {mount_point} \\
+ExecStart={rclone_path} mount {remote_name}:/ {mount_point} \\
     --config {config_path} \\
     {mount_options} \\
     --dir-cache-time 10m \\
@@ -278,6 +306,7 @@ ExecStart=/usr/bin/rclone mount {remote_name}:/ {mount_point} \\
     --log-level INFO \\
     --log-file /var/log/rclone-{remote_name}.log
 ExecStop=/bin/fusermount -u {mount_point}
+ExecStopPost={exec_command} mount unmount {mount_point}
 Restart=on-failure
 RestartSec=10
 KillMode=process
