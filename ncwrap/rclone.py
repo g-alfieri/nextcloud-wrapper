@@ -32,7 +32,7 @@ MINIMAL_CACHE_OPTIONS = [
 
 WRITES_CACHE_OPTIONS = [
     "--vfs-cache-mode", "writes",   # Sync bidirezionale con cache intelligente
-    "--vfs-cache-max-age", "2h",    # Cache più lunga per efficienza
+    "--vfs-cache-max-size", "2G",   # Limite cache: max 2GB (LRU cleanup)
     "--buffer-size", "64M",
     "--dir-cache-time", "10m",
     "--allow-other"
@@ -63,7 +63,7 @@ MOUNT_PROFILES = {
         "options": WRITES_CACHE_OPTIONS,
         "description": "Sync bidirezionale con cache file modificati",
         "use_case": "Editing files, sync automatico modifiche",
-        "storage": "Crescente (cache file modificati)",
+        "storage": "Max 2GB, persistente (LRU cleanup)",
         "performance": "Ottima con cache persistente",
         "sync": "Bidirezionale completo"
     }
@@ -370,7 +370,7 @@ def estimate_storage_usage(profile: str, files_accessed_daily: int = 100,
         max_cache = min(daily_cache, 1024)  # Limite 1GB
         return f"~{max_cache:.0f} MB (con auto-cleanup ogni ora)"
     elif profile == "writes":
-        return f"Crescente (~{files_accessed_daily * avg_file_size_mb * 7:.0f} MB/settimana)"
+        return "Max 2GB (cache persistente con LRU cleanup)"
     else:
         return "Sconosciuto"
 
@@ -395,7 +395,7 @@ def create_systemd_mount_service(service_name: str, remote_name: str,
     profile_options = {
         "hosting": "--vfs-cache-mode off --buffer-size 0 --read-only",
         "minimal": "--vfs-cache-mode minimal --vfs-cache-max-size 1G --buffer-size 32M", 
-        "writes": "--vfs-cache-mode writes --vfs-cache-max-age 2h --buffer-size 64M"
+        "writes": "--vfs-cache-mode writes --vfs-cache-max-size 2G --buffer-size 64M"
     }
     
     mount_options = profile_options.get(profile, profile_options["writes"])

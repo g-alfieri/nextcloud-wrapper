@@ -254,7 +254,7 @@ class SystemdManager:
         profile_options = {
             "hosting": "--vfs-cache-mode off --buffer-size 0 --read-only",
             "minimal": "--vfs-cache-mode minimal --vfs-cache-max-size 1G --buffer-size 32M", 
-            "writes": "--vfs-cache-mode writes --vfs-cache-max-age 2h --buffer-size 64M"
+            "writes": "--vfs-cache-mode writes --vfs-cache-max-size 2G --buffer-size 64M"
         }
         
         mount_options = profile_options.get(profile, profile_options["writes"])

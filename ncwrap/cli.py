@@ -374,8 +374,8 @@ def show_mount_profiles():
     rprint("   ✅ Sync bidirezionale completo")
     rprint("   ✅ File modificati localmente caricati su Nextcloud")
     rprint("   ✅ Modifiche client Nextcloud sincronizzate localmente")
-    rprint("   ✅ Cache persistente per performance ottime")
-    rprint("   ⚠️  Storage cresce con l'uso")
+    rprint("   ✅ Cache persistente max 2GB (LRU cleanup)")
+    rprint("   ⚠️  Storage: max 2GB (controllo LRU)")
     
     rprint("\n[yellow]⚡ MINIMAL PROFILE:[/yellow]")
     rprint("   ✅ Cache intelligente (max 1GB)")
