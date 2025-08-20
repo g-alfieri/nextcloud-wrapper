@@ -64,8 +64,9 @@ def create_user(
     subdomini: List[str] = typer.Option([], "--sub", help="Sottodomini da creare"),
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare login WebDAV"),
-    create_remote: bool = typer.Option(True, "--remote/--no-remote", help="Crea remote rclone"),
-    quota: Optional[str] = typer.Option(None, "--quota", help="Quota utente (es. 5G)")
+    mount_profile: str = typer.Option("writes", help="Profilo mount (hosting/minimal/writes)"),
+    quota: Optional[str] = typer.Option(None, "--quota", help="Quota Nextcloud (es. 100G)"),
+    fs_percentage: float = typer.Option(0.02, "--fs-percentage", help="Percentuale filesystem (default: 2%)")
 ):
     """Crea utente completo: Nextcloud + Linux + remote rclone + quota"""
     rprint(f"[bold blue]🚀 Creazione utente completo: {dominio}[/bold blue]")
@@ -121,19 +122,26 @@ def create_user(
                     rprint("[red]❌ Errore creazione utente Linux[/red]")
         
         # 5. Crea remote rclone
-        if create_remote:
-            rprint("[yellow]🔗 Creando remote rclone...[/yellow]")
-            if add_nextcloud_remote(dominio, base_url, dominio, password):
-                rprint("[green]✅ Remote rclone creato[/green]")
-            else:
-                rprint("[red]❌ Errore creazione remote rclone[/red]")
+        rprint("[yellow]🔗 Creando remote rclone...[/yellow]")
+        if add_nextcloud_remote(dominio, base_url, dominio, password):
+            rprint("[green]✅ Remote rclone creato[/green]")
+        else:
+            rprint("[red]❌ Errore creazione remote rclone[/red]")
+            
+        # Info profilo mount scelto
+        from .rclone import get_mount_profile_info
+        profile_info = get_mount_profile_info(mount_profile)
+        if profile_info:
+            rprint(f"[cyan]ℹ️  Profilo mount: {mount_profile} - {profile_info['description']}[/cyan]")
         
         # 6. Imposta quota
         if quota and not skip_linux:
-            rprint(f"[yellow]💾 Impostando quota {quota}...[/yellow]")
+            rprint(f"[yellow]💾 Impostando quota Nextcloud {quota} → Filesystem {fs_percentage:.1%}...[/yellow]")
             quota_manager = QuotaManager()
-            if quota_manager.set_quota(dominio, quota):
-                rprint(f"[green]✅ Quota {quota} impostata[/green]")
+            if quota_manager.set_quota(dominio, quota, fs_percentage):
+                filesystem_quota = int(quota_manager._parse_size(quota) * fs_percentage)
+                fs_human = quota_manager._bytes_to_human(filesystem_quota)
+                rprint(f"[green]✅ Quota impostata: NC {quota} → FS {fs_human}[/green]")
             else:
                 rprint("[red]❌ Errore impostazione quota[/red]")
         
@@ -281,13 +289,45 @@ def add_mount(
 def mount_remote_cmd(
     remote: str = typer.Argument(help="Nome remote da montare"),
     mount_point: str = typer.Argument(help="Directory di mount"),
+    profile: str = typer.Option("writes", help="Profilo mount (hosting/minimal/writes)"),
     background: bool = typer.Option(True, "--daemon/--foreground", help="Esegui in background")
 ):
-    """Monta remote rclone"""
-    rprint(f"[blue]📁 Montando {remote} in {mount_point}[/blue]")
+    """
+    Monta remote rclone con profilo specifico
     
-    if mount_remote(remote, mount_point, background):
-        rprint("[green]✅ Mount riuscito[/green]")
+    Profili disponibili:
+    - hosting: Zero cache locale, streaming puro (read-only)
+    - minimal: Cache 1GB max con auto-cleanup
+    - writes: Sync bidirezionale con cache intelligente (DEFAULT)
+    """
+    rprint(f"[blue]📁 Montando {remote} in {mount_point} (profilo: {profile})[/blue]")
+    
+    # Mostra info profilo prima del mount
+    from .rclone import get_mount_profile_info
+    profile_info = get_mount_profile_info(profile)
+    if profile_info:
+        rprint(f"[cyan]ℹ️  {profile_info['description']}[/cyan]")
+        rprint(f"[yellow]💾 Storage locale: {profile_info['storage']}[/yellow]")
+    
+    if mount_remote(remote, mount_point, background, profile):
+        rprint(f"[green]✅ Mount riuscito con profilo {profile}[/green]")
+        
+        # Consigli specifici per profilo
+        if profile == "writes":
+            rprint("[green]🔄 Sync bidirezionale attivo:[/green]")
+            rprint("   • File modificati localmente sincronizzati su Nextcloud")
+            rprint("   • Modifiche da client Nextcloud sincronizzate localmente") 
+            rprint("   • Cache persistente per performance")
+        elif profile == "minimal":
+            rprint("[green]⚡ Cache intelligente attiva:[/green]")
+            rprint("   • File frequenti cached localmente")
+            rprint("   • Auto-cleanup quando cache > 1GB")
+            rprint("   • Read-only (nessun upload)")
+        elif profile == "hosting":
+            rprint("[green]🌐 Hosting ottimizzato:[/green]")
+            rprint("   • File serviti direttamente da Nextcloud")
+            rprint("   • Zero storage locale utilizzato") 
+            rprint("   • Read-only sicuro")
     else:
         rprint("[red]❌ Errore durante mount[/red]")
 
@@ -305,9 +345,62 @@ def unmount_cmd(
         rprint("[red]❌ Errore durante unmount[/red]")
 
 
+@mount_app.command("profiles")
+def show_mount_profiles():
+    """Mostra profili mount con dettagli storage e performance"""
+    rprint("[blue]📋 Profili Mount Disponibili[/blue]")
+    
+    from .rclone import list_mount_profiles
+    
+    table = Table(title="Profili Mount")
+    table.add_column("Profilo", style="cyan", width=12)
+    table.add_column("Caso d'uso", style="white", width=25)
+    table.add_column("Storage Locale", style="green", width=18)
+    table.add_column("Sync", style="yellow", width=20)
+    
+    profiles = list_mount_profiles()
+    for name, info in profiles.items():
+        table.add_row(
+            name,
+            info['use_case'],
+            info['storage'],
+            info['sync']
+        )
+    
+    console.print(table)
+    
+    rprint("\n[bold]💡 Raccomandazioni:[/bold]")
+    rprint("[green]🔄 WRITES PROFILE (DEFAULT RACCOMANDATO):[/green]")
+    rprint("   ✅ Sync bidirezionale completo")
+    rprint("   ✅ File modificati localmente caricati su Nextcloud")
+    rprint("   ✅ Modifiche client Nextcloud sincronizzate localmente")
+    rprint("   ✅ Cache persistente per performance ottime")
+    rprint("   ⚠️  Storage cresce con l'uso")
+    
+    rprint("\n[yellow]⚡ MINIMAL PROFILE:[/yellow]")
+    rprint("   ✅ Cache intelligente (max 1GB)")
+    rprint("   ✅ Auto-cleanup automatico")
+    rprint("   ❌ Read-only (nessun upload)")
+    rprint("   ⚠️  Storage limitato")
+    
+    rprint("\n[cyan]🌐 HOSTING PROFILE:[/cyan]")
+    rprint("   ✅ Zero storage VPS utilizzato")
+    rprint("   ✅ File serviti on-demand")
+    rprint("   ❌ Read-only (nessun upload)")
+    rprint("   ⚠️  Performance dipende da rete")
+    
+    rprint("\n[bold]Esempi comando:[/bold]")
+    rprint("# Sync bidirezionale completo (DEFAULT)")
+    rprint("[green]nextcloud-wrapper mount mount cliente1 /mnt/nextcloud --profile writes[/green]")
+    rprint("\n# Cache intelligente limitata")  
+    rprint("[green]nextcloud-wrapper mount mount cliente1 /mnt/nextcloud --profile minimal[/green]")
+    rprint("\n# Web hosting puro (zero storage)")
+    rprint("[green]nextcloud-wrapper mount mount cliente1 /var/www/html --profile hosting[/green]")
+
+
 @mount_app.command("list")
 def list_mounts():
-    """Lista remote configurati"""
+    """Lista remote configurati con status"""
     rprint("[blue]📋 Remote rclone configurati[/blue]")
     
     remotes = list_remotes()
@@ -325,23 +418,39 @@ def list_mounts():
         rprint("[yellow]Nessun remote configurato[/yellow]")
 
 
-@mount_app.command("sync")
-def sync_cmd(
-    source: str = typer.Argument(help="Directory/remote sorgente"),
-    dest: str = typer.Argument(help="Directory/remote destinazione"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Solo simulazione"),
-    delete: bool = typer.Option(False, "--delete", help="Elimina file extra in destinazione")
+@mount_app.command("storage-calc")
+def calculate_storage_usage(
+    profile: str = typer.Argument(help="Profilo mount (hosting/minimal/writes)"),
+    daily_files: int = typer.Option(100, help="File acceduti al giorno"),
+    avg_size_mb: float = typer.Option(1.0, help="Dimensione media file (MB)")
 ):
-    """Sincronizza directory con rclone"""
-    rprint(f"[blue]🔄 Sincronizzando {source} → {dest}[/blue]")
+    """Calcola stima uso storage per un profilo"""
+    rprint(f"[blue]📊 Calcolo storage per profilo: {profile}[/blue]")
     
-    if dry_run:
-        rprint("[yellow]🔍 Modalità dry-run (simulazione)[/yellow]")
+    from .rclone import estimate_storage_usage
+    usage = estimate_storage_usage(profile, daily_files, avg_size_mb)
+    rprint(f"[green]💾 Storage stimato: {usage}[/green]")
     
-    if sync_directories(source, dest, dry_run, delete):
-        rprint("[green]✅ Sincronizzazione completata[/green]")
-    else:
-        rprint("[red]❌ Errore durante sincronizzazione[/red]")
+    if profile == "writes":
+        weekly_mb = daily_files * avg_size_mb * 0.7  # ~70% dei file viene cached
+        rprint(f"\n[cyan]🔄 Profilo WRITES:[/cyan]")
+        rprint(f"   • Cache attiva: ~{weekly_mb:.0f} MB medi")
+        rprint("   • Cache persistente (cresce nel tempo)")
+        rprint("   • Sync bidirezionale completo")
+        rprint("   • Performance ottime dopo primo accesso")
+    elif profile == "minimal":
+        weekly_mb = daily_files * avg_size_mb * 0.3  # ~30% dei file viene cached
+        rprint(f"\n[cyan]⚡ Profilo MINIMAL:[/cyan]")
+        rprint(f"   • Cache attiva: ~{weekly_mb:.0f} MB medi")
+        rprint("   • Auto-cleanup dopo 1 ora inattività")
+        rprint("   • Limite massimo: 1GB")
+        rprint("   • Read-only (nessun upload)")
+    elif profile == "hosting":
+        rprint("\n[cyan]🌐 Profilo HOSTING:[/cyan]")
+        rprint("   • File non salvati localmente")
+        rprint("   • Ogni richiesta = download da Nextcloud")
+        rprint("   • Zero accumulo cache")
+        rprint("   • Read-only sicuro")
 
 
 # =================== COMANDI QUOTA ===================
@@ -349,15 +458,21 @@ def sync_cmd(
 @quota_app.command("set")
 def set_quota(
     username: str = typer.Argument(help="Nome utente"),
-    size: str = typer.Argument(help="Dimensione quota (es. 5G, 1T)"),
+    nextcloud_quota: str = typer.Argument(help="Quota Nextcloud (es. 100G, 50G)"),
+    fs_percentage: float = typer.Option(0.02, "--fs-percentage", help="Percentuale filesystem (default: 2%)"),
+    mount_profile: str = typer.Option("writes", help="Profilo mount (hosting/minimal/writes)"),
     path: str = typer.Option("/home", help="Path base per btrfs")
 ):
-    """Imposta quota per utente"""
-    rprint(f"[blue]💾 Impostando quota {size} per {username}[/blue]")
+    """Imposta quota filesystem come percentuale della quota Nextcloud"""
+    rprint(f"[blue]💾 Impostando quota NC {nextcloud_quota} → FS {fs_percentage:.1%} per {username}[/blue]")
     
     quota_manager = QuotaManager()
-    if quota_manager.set_quota(username, size, path=path):
-        rprint("[green]✅ Quota impostata con successo[/green]")
+    if quota_manager.set_quota(username, nextcloud_quota, fs_percentage, path=path):
+        # Calcola e mostra quota filesystem risultante
+        nc_bytes = quota_manager._parse_size(nextcloud_quota)
+        fs_bytes = int(nc_bytes * fs_percentage)
+        fs_human = quota_manager._bytes_to_human(fs_bytes)
+        rprint(f"[green]✅ Quota impostata: NC {nextcloud_quota} → FS {fs_human}[/green]")
     else:
         rprint("[red]❌ Errore impostazione quota[/red]")
 
@@ -428,16 +543,23 @@ def create_mount_service(
     username: str = typer.Argument(help="Nome utente"),
     remote: str = typer.Argument(help="Nome remote"),
     mount_point: str = typer.Argument(help="Directory di mount"),
-    user: bool = typer.Option(False, "--user", help="Servizio utente invece di system")
+    user: bool = typer.Option(False, "--user", help="Servizio utente invece di system"),
+    profile: str = typer.Option("writes", help="Profilo mount (hosting/minimal/writes)")
 ):
-    """Crea servizio systemd per mount automatico"""
-    rprint(f"[blue]⚙️  Creando servizio mount per {username}[/blue]")
+    """Crea servizio systemd per mount automatico con profilo"""
+    rprint(f"[blue]⚙️  Creando servizio mount per {username} (profilo: {profile})[/blue]")
+    
+    # Mostra info profilo
+    from .rclone import get_mount_profile_info
+    profile_info = get_mount_profile_info(profile)
+    if profile_info:
+        rprint(f"[cyan]ℹ️  {profile_info['description']}[/cyan]")
     
     systemd_manager = SystemdManager()
-    service_name = systemd_manager.create_mount_service(username, remote, mount_point, user)
+    service_name = systemd_manager.create_mount_service(username, remote, mount_point, user, profile)
     
     if service_name:
-        rprint(f"[green]✅ Servizio {service_name} creato[/green]")
+        rprint(f"[green]✅ Servizio {service_name} creato con profilo {profile}[/green]")
         
         # Chiedi se abilitare subito
         enable = typer.confirm("Abilitare e avviare il servizio ora?")
@@ -573,7 +695,8 @@ def config():
 def setup(
     username: str = typer.Argument(help="Nome utente per setup completo"),
     password: str = typer.Argument(help="Password utente"),
-    quota: Optional[str] = typer.Option("5G", help="Quota da assegnare"),
+    quota: Optional[str] = typer.Option("100G", help="Quota Nextcloud da assegnare"),
+    fs_percentage: float = typer.Option(0.02, "--fs-percentage", help="Percentuale filesystem (default: 2%)"),
     subdomains: List[str] = typer.Option([], "--sub", help="Sottodomini"),
     auto_mount: bool = typer.Option(True, "--mount/--no-mount", help="Configura mount automatico"),
     mount_point: Optional[str] = typer.Option(None, help="Directory di mount custom")
@@ -587,8 +710,8 @@ def setup(
         # 1. Crea utente completo
         rprint("[yellow]1️⃣ Creazione utente completo...[/yellow]")
         
-        # Simula chiamata create_user con parametri
-        create_user(username, password, subdomains, quota=quota)
+        # Simula chiamata create_user con parametri  
+        create_user(username, password, subdomains, quota=quota, fs_percentage=fs_percentage)
         
         # 2. Setup mount automatico
         if auto_mount:

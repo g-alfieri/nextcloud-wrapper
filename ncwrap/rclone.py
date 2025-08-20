@@ -10,13 +10,64 @@ from .utils import run, ensure_dir
 
 # Configurazione globale
 RCLONE_CONF = Path.home() / ".config" / "ncwrap" / "rclone.conf"
-DEFAULT_MOUNT_OPTIONS = [
-    "--vfs-cache-mode", "full",
-    "--vfs-cache-max-age", "1h",
-    "--buffer-size", "256M",
+# Configurazioni per diversi scenari di hosting
+HOSTING_MOUNT_OPTIONS = [
+    "--vfs-cache-mode", "off",      # Zero cache locale, streaming puro
+    "--buffer-size", "0",           # No buffer locale 
+    "--vfs-read-chunk-size", "128M", # Chunk size per performance lettura
+    "--vfs-read-chunk-size-limit", "2G", # Limite chunk per file grandi
+    "--dir-cache-time", "5m",       # Cache solo metadata directory
+    "--allow-other",
+    "--read-only"                   # Mount read-only per sicurezza
+]
+
+MINIMAL_CACHE_OPTIONS = [
+    "--vfs-cache-mode", "minimal",  # Cache minimal con auto-cleanup
+    "--vfs-cache-max-size", "1G",   # Limite cache: max 1GB
+    "--vfs-cache-max-age", "1h",    # Auto-cleanup dopo 1 ora
+    "--buffer-size", "32M",
     "--dir-cache-time", "5m",
     "--allow-other"
 ]
+
+WRITES_CACHE_OPTIONS = [
+    "--vfs-cache-mode", "writes",   # Sync bidirezionale con cache intelligente
+    "--vfs-cache-max-age", "2h",    # Cache più lunga per efficienza
+    "--buffer-size", "64M",
+    "--dir-cache-time", "10m",
+    "--allow-other"
+]
+
+# Default: modalità writes per sync bidirezionale
+DEFAULT_MOUNT_OPTIONS = WRITES_CACHE_OPTIONS
+
+# Profili predefiniti
+MOUNT_PROFILES = {
+    "hosting": {
+        "options": HOSTING_MOUNT_OPTIONS,
+        "description": "Web hosting - streaming puro, zero cache locale",
+        "use_case": "Apache/Nginx serving, SFTP read-only",
+        "storage": "0 bytes (streaming)",
+        "performance": "Network dependent",
+        "sync": "Read-only, no uploads"
+    },
+    "minimal": {
+        "options": MINIMAL_CACHE_OPTIONS, 
+        "description": "Cache minimal con auto-cleanup intelligente",
+        "use_case": "Hosting con cache temporanea",
+        "storage": "Max 1GB, auto-cleanup",
+        "performance": "Buona con cache",
+        "sync": "Read-only, no uploads"
+    },
+    "writes": {
+        "options": WRITES_CACHE_OPTIONS,
+        "description": "Sync bidirezionale con cache file modificati",
+        "use_case": "Editing files, sync automatico modifiche",
+        "storage": "Crescente (cache file modificati)",
+        "performance": "Ottima con cache persistente",
+        "sync": "Bidirezionale completo"
+    }
+}
 
 
 def ensure_config():
@@ -80,15 +131,16 @@ def list_remotes() -> List[str]:
 
 
 def mount_remote(remote_name: str, mount_point: str, background: bool = True, 
-                 options: Optional[List[str]] = None) -> bool:
+                 profile: str = "writes", custom_options: Optional[List[str]] = None) -> bool:
     """
-    Monta un remote rclone su un punto di mount
+    Monta un remote rclone con profilo specifico
     
     Args:
         remote_name: Nome del remote da montare
         mount_point: Directory dove montare
         background: Se eseguire in background (daemon)
-        options: Opzioni aggiuntive per rclone mount
+        profile: Profilo mount ("hosting", "minimal", "writes")
+        custom_options: Opzioni personalizzate (sovrascrivono profilo)
         
     Returns:
         True se mount riuscito
@@ -101,18 +153,36 @@ def mount_remote(remote_name: str, mount_point: str, background: bool = True,
         "--config", str(RCLONE_CONF)
     ]
     
-    # Aggiungi opzioni di default
-    cmd.extend(options or DEFAULT_MOUNT_OPTIONS)
+    # Usa opzioni custom o profilo
+    if custom_options:
+        cmd.extend(custom_options)
+    elif profile in MOUNT_PROFILES:
+        cmd.extend(MOUNT_PROFILES[profile]["options"])
+    else:
+        # Default: writes profile
+        cmd.extend(DEFAULT_MOUNT_OPTIONS)
     
     # Modalità daemon se richiesta
     if background:
         cmd.append("--daemon")
+    
+    # Log comando per debug
+    print(f"Mount command: {' '.join(cmd)}")
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"Errore mount: {result.stderr}")
             return False
+        
+        # Mostra info profilo usato
+        if profile in MOUNT_PROFILES:
+            profile_info = MOUNT_PROFILES[profile]
+            print(f"✅ Mount attivo con profilo '{profile}':")
+            print(f"   📁 Storage: {profile_info['storage']}")
+            print(f"   🔄 Sync: {profile_info['sync']}")
+            print(f"   💾 Use case: {profile_info['use_case']}")
+        
         return True
     except Exception as e:
         print(f"Errore durante mount {remote_name}: {e}")
@@ -270,37 +340,88 @@ def get_space_info(remote_name: str) -> Optional[Dict]:
         return None
 
 
-def create_systemd_mount_service(service_name: str, remote_name: str, 
-                                mount_point: str, user: str = "root") -> str:
+def get_mount_profile_info(profile: str) -> Optional[Dict]:
+    """Recupera informazioni su un profilo mount"""
+    return MOUNT_PROFILES.get(profile)
+
+
+def list_mount_profiles() -> Dict[str, Dict]:
+    """Lista tutti i profili mount disponibili"""
+    return MOUNT_PROFILES
+
+
+def estimate_storage_usage(profile: str, files_accessed_daily: int = 100, 
+                          avg_file_size_mb: float = 1.0) -> str:
     """
-    Genera configurazione systemd per mount automatico
+    Stima uso storage per un profilo dato il pattern di accesso
+    
+    Args:
+        profile: Nome profilo
+        files_accessed_daily: File mediamente acceduti al giorno
+        avg_file_size_mb: Dimensione media file in MB
+        
+    Returns:
+        Stima uso storage come stringa
+    """
+    if profile == "hosting":
+        return "0 MB (streaming puro - zero storage locale)"
+    elif profile == "minimal":
+        daily_cache = files_accessed_daily * avg_file_size_mb
+        max_cache = min(daily_cache, 1024)  # Limite 1GB
+        return f"~{max_cache:.0f} MB (con auto-cleanup ogni ora)"
+    elif profile == "writes":
+        return f"Crescente (~{files_accessed_daily * avg_file_size_mb * 7:.0f} MB/settimana)"
+    else:
+        return "Sconosciuto"
+
+
+def create_systemd_mount_service(service_name: str, remote_name: str, 
+                                mount_point: str, user: str = "root", 
+                                profile: str = "writes") -> str:
+    """
+    Genera configurazione systemd per mount automatico con profilo
     
     Args:
         service_name: Nome del servizio (es. nextcloud-mount-user1)
         remote_name: Nome remote rclone
         mount_point: Punto di mount
         user: Utente che esegue il servizio
+        profile: Profilo mount ("hosting", "minimal", "writes")
         
     Returns:
         Contenuto file .service
     """
+    # Opzioni per profilo
+    profile_options = {
+        "hosting": "--vfs-cache-mode off --buffer-size 0 --read-only",
+        "minimal": "--vfs-cache-mode minimal --vfs-cache-max-size 1G --buffer-size 32M", 
+        "writes": "--vfs-cache-mode writes --vfs-cache-max-age 2h --buffer-size 64M"
+    }
+    
+    mount_options = profile_options.get(profile, profile_options["writes"])
+    
     service_content = f"""[Unit]
-Description=RClone mount for {remote_name}
-After=network.target
-Wants=network.target
+Description=RClone mount for {remote_name} -> {mount_point} (profile: {profile})
+After=network-online.target
+Wants=network-online.target
+AssertPathIsDirectory={mount_point}
 
 [Service]
 Type=notify
 User={user}
 Group={user}
+ExecStartPre=/bin/mkdir -p {mount_point}
 ExecStart=/usr/bin/rclone mount {remote_name}:/ {mount_point} \\
     --config {RCLONE_CONF} \\
-    --vfs-cache-mode full \\
+    {mount_options} \\
+    --dir-cache-time 10m \\
     --allow-other \\
-    --daemon
+    --log-level INFO \\
+    --log-file /var/log/rclone-{remote_name}.log
 ExecStop=/bin/fusermount -u {mount_point}
 Restart=on-failure
-RestartSec=5
+RestartSec=10
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

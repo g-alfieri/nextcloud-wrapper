@@ -23,24 +23,35 @@ class QuotaManager:
         except:
             return "unknown"
     
-    def set_quota(self, username: str, soft_limit: str, hard_limit: str = None, 
-                  path: str = "/home") -> bool:
+    def set_quota(self, username: str, nextcloud_quota: str, filesystem_percentage: float = 0.02,
+                  hard_limit: str = None, path: str = "/home") -> bool:
         """
-        Imposta quota per un utente
+        Imposta quota filesystem come percentuale della quota Nextcloud
         
         Args:
             username: Nome utente
-            soft_limit: Limite soft (es. "1G", "500M")
+            nextcloud_quota: Quota Nextcloud (es. "100G", "50G")
+            filesystem_percentage: Percentuale per filesystem (default 2% = 0.02)
             hard_limit: Limite hard (opzionale, default = soft_limit * 1.1)
             path: Path per btrfs subvolume
             
         Returns:
             True se quota impostata con successo
+        
+        Note:
+            La quota filesystem è calcolata come percentuale della quota Nextcloud.
+            Default: filesystem = nextcloud * 2% (es. 100GB NC → 2GB filesystem)
         """
+        # Calcola quota filesystem come percentuale di quella Nextcloud
+        nc_bytes = self._parse_size(nextcloud_quota)
+        fs_bytes = int(nc_bytes * filesystem_percentage)
+        soft_limit = self._bytes_to_human(fs_bytes)
+        
         if not hard_limit:
             # Hard limit = 110% del soft limit
-            size_bytes = self._parse_size(soft_limit)
-            hard_limit = f"{int(size_bytes * 1.1)}"
+            hard_limit = self._bytes_to_human(int(fs_bytes * 1.1))
+        
+        print(f"Setting quota: Nextcloud {nextcloud_quota} → Filesystem {soft_limit} ({filesystem_percentage:.1%})")
         
         fs_type = self._detect_filesystem_type(path)
         
@@ -203,13 +214,15 @@ class QuotaManager:
 
 # Backward compatibility functions
 def set_btrfs_quota(path: str, size: str) -> bool:
-    """Wrapper per compatibilità"""
+    """Wrapper per compatibilità - DEPRECATO: usare QuotaManager.set_quota()"""
+    print("DEPRECATED: usare QuotaManager.set_quota() con nextcloud_quota e filesystem_percentage")
     manager = QuotaManager()
     return manager._set_btrfs_quota(path, size)
 
 
 def set_ext4_quota(user: str, size: str) -> bool:
-    """Wrapper per compatibilità"""
+    """Wrapper per compatibilità - DEPRECATO: usare QuotaManager.set_quota()"""
+    print("DEPRECATED: usare QuotaManager.set_quota() con nextcloud_quota e filesystem_percentage")
     manager = QuotaManager()
     return manager._set_posix_quota(user, size, size)
 

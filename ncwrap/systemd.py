@@ -16,24 +16,26 @@ class SystemdManager:
         self.user_dir = Path.home() / ".config/systemd/user"
     
     def create_mount_service(self, username: str, remote_name: str, 
-                           mount_point: str, user: bool = False) -> str:
+                           mount_point: str, user: bool = False, 
+                           profile: str = "writes") -> str:
         """
-        Crea servizio systemd per mount rclone automatico
+        Crea servizio systemd per mount rclone automatico con profilo
         
         Args:
             username: Nome utente (per nome servizio)
             remote_name: Nome remote rclone
             mount_point: Directory di mount
             user: Se creare servizio utente (True) o system (False)
+            profile: Profilo mount ("hosting", "minimal", "writes")
             
         Returns:
             Nome del servizio creato
         """
         service_name = f"nextcloud-mount-{username}.service"
         
-        # Configurazione servizio
+        # Configurazione servizio con profilo
         service_content = self._generate_mount_service_config(
-            remote_name, mount_point, username if user else "root"
+            remote_name, mount_point, username if user else "root", profile
         )
         
         # Path appropriato per il file .service
@@ -46,6 +48,8 @@ class SystemdManager:
         
         # Reload systemd
         self._reload_systemd(user=user)
+        
+        print(f"✅ Servizio creato con profilo '{profile}': {service_name.replace('.service', '')}")
         
         return service_name.replace('.service', '')
     
@@ -240,14 +244,23 @@ class SystemdManager:
             return False
     
     def _generate_mount_service_config(self, remote_name: str, mount_point: str, 
-                                     user: str) -> str:
-        """Genera configurazione servizio mount"""
+                                     user: str, profile: str = "writes") -> str:
+        """Genera configurazione servizio mount con profilo specifico"""
         from . import rclone  # Import locale
         
         config_path = rclone.RCLONE_CONF
         
+        # Opzioni per profilo
+        profile_options = {
+            "hosting": "--vfs-cache-mode off --buffer-size 0 --read-only",
+            "minimal": "--vfs-cache-mode minimal --vfs-cache-max-size 1G --buffer-size 32M", 
+            "writes": "--vfs-cache-mode writes --vfs-cache-max-age 2h --buffer-size 64M"
+        }
+        
+        mount_options = profile_options.get(profile, profile_options["writes"])
+        
         return f"""[Unit]
-Description=RClone mount for {remote_name} -> {mount_point}
+Description=RClone mount for {remote_name} -> {mount_point} (profile: {profile})
 After=network-online.target
 Wants=network-online.target
 AssertPathIsDirectory={mount_point}
@@ -259,10 +272,8 @@ Group={user}
 ExecStartPre=/bin/mkdir -p {mount_point}
 ExecStart=/usr/bin/rclone mount {remote_name}:/ {mount_point} \\
     --config {config_path} \\
-    --vfs-cache-mode full \\
-    --vfs-cache-max-age 1h \\
-    --buffer-size 256M \\
-    --dir-cache-time 5m \\
+    {mount_options} \\
+    --dir-cache-time 10m \\
     --allow-other \\
     --log-level INFO \\
     --log-file /var/log/rclone-{remote_name}.log

@@ -281,6 +281,231 @@ curl -I "$NC_BASE_URL/status.php"
 4. Push branch (`git push origin feature/nuova-funzione`)
 5. Apri Pull Request
 
+### Guidelines Sviluppo
+
+- **Quote Logic**: sempre usare `filesystem = nextcloud * percentage`
+- **RClone Options**: preferire `writes` invece di `full` per vfs-cache
+- **CLI Design**: sotto-comandi logici (`user`, `mount`, `quota`, `service`)
+- **Error Handling**: sempre gestire errori con messaggi utili
+- **Testing**: testare su btrfs, ext4, xfs
+
+## Testing
+
+### Test Suite Completo
+```bash
+# Test setup base
+nextcloud-wrapper setup test-user.com 'TestPass123!' --quota 10G --fs-percentage 0.1
+
+# Verifica tutto funzioni
+nextcloud-wrapper user info test-user.com
+nextcloud-wrapper quota show test-user.com  # Dovrebbe mostrare ~1GB filesystem
+nextcloud-wrapper mount list
+nextcloud-wrapper service list
+
+# Cleanup
+nextcloud-wrapper service disable nextcloud-mount-test-user
+sudo userdel -r test-user.com
+```
+
+### Test Performance
+```bash
+# Test mount performance
+time nextcloud-wrapper mount mount test-user /mnt/test
+
+# Test sync performance
+time nextcloud-wrapper mount sync /tmp/testdata test-user:/backup --dry-run
+
+# Test quota enforcement
+dd if=/dev/zero of=/home/test-user/bigfile bs=1M count=1100  # Dovrebbe fallire se quota 1GB
+```
+
+### Test Multi-Filesystem
+```bash
+# Test su ext4
+nextcloud-wrapper quota set user1 100G --fs-percentage 0.02
+
+# Test su btrfs (se disponibile)
+sudo btrfs subvolume create /home/user2
+nextcloud-wrapper quota set user2 100G --fs-percentage 0.02
+```
+
+## Deployment Produzione
+
+### Requisiti Sistema
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y rclone quota quotatool python3-pip fuse
+
+# CentOS/RHEL
+sudo yum install -y rclone quota python3-pip fuse
+
+# Arch Linux
+sudo pacman -S rclone quota python-pip fuse
+```
+
+### Setup Produzione
+```bash
+# 1. Clone e installa
+git clone <repo-url>
+cd nextcloud-wrapper
+pip install -e .
+
+# 2. Configura variabili
+echo 'export NC_BASE_URL="https://your-nextcloud.com"' >> ~/.bashrc
+echo 'export NC_ADMIN_USER="admin"' >> ~/.bashrc
+echo 'export NC_ADMIN_PASS="your-admin-pass"' >> ~/.bashrc
+source ~/.bashrc
+
+# 3. Setup quota system
+sudo quotacheck -cum /
+sudo quotaon /
+
+# 4. Test configurazione
+nextcloud-wrapper config
+```
+
+### Automazione Cron
+```bash
+# Sync automatici ogni ora
+echo "0 * * * * /usr/local/bin/nextcloud-wrapper mount sync /var/backups remote:/backup" | crontab -
+
+# Cleanup cache giornaliero
+echo "0 2 * * * find /tmp -name 'rclone-*' -mtime +1 -delete" | crontab -
+
+# Report quote settimanale
+echo "0 9 * * 1 /usr/local/bin/nextcloud-wrapper quota show | mail -s 'Weekly Quota Report' admin@domain.com" | crontab -
+```
+
+## Sicurezza
+
+### Best Practices
+1. **Password Strong**: sempre usare password complesse (12+ caratteri)
+2. **Sudo Limitato**: configurare sudo passwordless solo per comandi necessari
+3. **Mount Security**: usare `--allow-other` solo se necessario
+4. **Log Monitoring**: monitorare `/var/log/rclone-*.log`
+5. **Quota Enforcement**: sempre impostare quote per prevenire disk full
+
+### Configurazione Sudo Sicura
+```bash
+# /etc/sudoers.d/nextcloud-wrapper
+www-data ALL=(root) NOPASSWD: /usr/bin/useradd, /usr/bin/userdel, /usr/bin/chpasswd
+www-data ALL=(root) NOPASSWD: /usr/bin/setquota, /usr/bin/quota
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl enable nextcloud-*
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl disable nextcloud-*
+```
+
+## Monitoring
+
+### Metriche Chiave
+```bash
+# Spazio utenti
+nextcloud-wrapper quota show | grep -E "(Used|Limit)"
+
+# Status mount
+systemctl list-units "nextcloud-mount-*" --no-pager
+
+# Performance rclone
+journalctl -u nextcloud-mount-* --since "1 hour ago" | grep -E "(ERROR|WARN)"
+```
+
+### Alerting Semplice
+```bash
+#!/bin/bash
+# /usr/local/bin/nextcloud-check.sh
+
+# Check mount failures
+if systemctl list-units "nextcloud-mount-*" | grep -q failed; then
+    echo "ALERT: Nextcloud mount failures detected" | mail -s "Mount Alert" admin@domain.com
+fi
+
+# Check quota near limits
+nextcloud-wrapper quota show | awk '$3 > 90 {print "ALERT: User " $1 " quota " $3 "% full"}' | \
+    mail -s "Quota Alert" admin@domain.com
+```
+
+## FAQ
+
+### Q: Perché filesystem quota = 2% di Nextcloud quota?
+**A**: La quota filesystem serve per cache, logs e temporanei. Il 2% è generalmente sufficiente. Per workload intensivi usa 3-5%.
+
+### Q: Posso cambiare la percentuale dopo?
+**A**: Sì! `nextcloud-wrapper quota set username 100G --fs-percentage 0.05`
+
+### Q: Come backup delle configurazioni?
+**A**: Le config sono in `~/.config/ncwrap/`. Fai backup di quella directory.
+
+### Q: Supporta multi-server?
+**A**: Al momento no, ma è nella roadmap v0.3.0
+
+### Q: Posso usare LDAP invece di utenti locali?
+**A**: Non ancora, ma pianificato per v0.3.0
+
+### Q: Come debug mount lenti?
+**A**: Verifica che usi `--vfs-cache-mode writes`. Se ancora lento, prova `minimal`.
+
+### Q: Limite massimo utenti?
+**A**: Teoricamente illimitato. In pratica dipende da RAM/CPU per i mount rclone.
+
+## Licenza
+
+MIT License - vedi `LICENSE` file per dettagli.
+
+## Supporto
+
+Per problemi o domande:
+- 🐛 **Bug Reports**: GitHub Issues
+- 💬 **Discussioni**: GitHub Discussions  
+- 📧 **Email**: supporto tecnico
+- 📖 **Docs**: Questo README + commenti nel codice
+
+## Crediti
+
+### Sviluppatori
+- **Core Team**: Sviluppo architettura modulare
+- **Community**: Bug reports e feature requests
+
+### Tecnologie
+- **[RClone](https://rclone.org/)**: Mount e sync cloud storage
+- **[Typer](https://typer.tiangolo.com/)**: CLI moderna e intuitiva
+- **[Rich](https://rich.readthedocs.io/)**: Output colorato e tabelle
+- **[Requests](https://docs.python-requests.org/)**: HTTP client per API Nextcloud
+
+---
+
+## 🎉 Changelog v0.2.0
+
+### ✅ Nuovo
+- **CLI unificata** con sotto-comandi logici
+- **Quote intelligenti** con logica corretta (filesystem = nextcloud * %)
+- **RClone manager** completo con mount ottimizzati
+- **SystemD automation** per servizi persistenti
+- **Setup one-shot** per configurazione rapida
+- **Performance ottimizzate** (vfs-cache-mode, buffer size)
+
+### 🔧 Migliorato
+- **Mount options**: `writes` invece di `full`, buffer 64M invece di 256M
+- **Error handling**: messaggi più chiari e informativi
+- **Documentazione**: README completo con esempi pratici
+- **API consistency**: parametri uniformi tra funzioni
+
+### 🐛 Corretto
+- **Quota logic**: filesystem quota ora calcolata correttamente
+- **Memory usage**: ridotto consumo RAM sui mount
+- **CLI parameters**: parametri consistenti tra comandi
+- **Edge cases**: gestione errori migliorata
+
+### 📋 Deprecato
+- `nextcloud_cli.py`: sostituito da `cli.py` unificata
+- Parametri quota diretti: ora usa Nextcloud quota + percentuale
+- Mount options pesanti: ora ottimizzate per default
+
+---
+
+**🚀 Nextcloud Wrapper v0.2.0 - Production Ready!**
+
+*From MVP to Enterprise Solution in One Major Release*
+
 ## Licenza
 
 MIT License - vedi `LICENSE` file per dettagli.
