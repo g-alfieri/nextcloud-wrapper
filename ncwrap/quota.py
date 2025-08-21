@@ -1,9 +1,12 @@
 """
 Gestione quote filesystem e utenti
 """
+import os
 import subprocess
 import re
 import json
+import pwd
+import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from .utils import run
@@ -56,28 +59,63 @@ class QuotaManager:
         fs_type = self._detect_filesystem_type(path)
         
         if fs_type == "btrfs":
-            return self._set_btrfs_quota(f"{path}/{username}", soft_limit)
+            return self._set_btrfs_quota(username, soft_limit, path)
         elif fs_type in ["ext4", "ext3", "xfs"]:
             return self._set_posix_quota(username, soft_limit, hard_limit)
         else:
             print(f"Filesystem {fs_type} non supportato per quote")
             return False
     
-    def _set_btrfs_quota(self, subvolume_path: str, size: str) -> bool:
-        """Imposta quota BTRFS su subvolume"""
+    def _set_btrfs_quota(self, username: str, size: str, base_path: str = "/home") -> bool:
+        """Imposta quota BTRFS su subvolume utente"""
         try:
+            subvolume_path = f"{base_path}/{username}"
+            
+            # Verifica se è un subvolume btrfs esistente
+            result = run(["btrfs", "subvolume", "show", subvolume_path], check=False)
+            
+            # Se non è un subvolume, crealo
+            if "ERROR" in result or "not a subvolume" in result.lower():
+                print(f"Creando subvolume btrfs per {username}...")
+                
+                # Se esiste directory normale, fai backup
+                if os.path.exists(subvolume_path) and not os.path.ismount(subvolume_path):
+                    backup_path = f"{subvolume_path}.backup.{int(time.time())}"
+                    os.rename(subvolume_path, backup_path)
+                    print(f"Directory esistente spostata in: {backup_path}")
+                
+                # Crea subvolume
+                run(["btrfs", "subvolume", "create", subvolume_path])
+                
+                # Imposta ownership se l'utente esiste
+                if self._user_exists(username):
+                    user_info = pwd.getpwnam(username)
+                    os.chown(subvolume_path, user_info.pw_uid, user_info.pw_gid)
+            
+            # Ottieni ID subvolume
+            subvol_info = run(["btrfs", "subvolume", "show", subvolume_path])
+            subvol_id = None
+            for line in subvol_info.split('\n'):
+                if 'Subvolume ID:' in line:
+                    subvol_id = line.split(':')[1].strip()
+                    break
+            
+            if not subvol_id:
+                print(f"Errore: impossibile ottenere ID subvolume per {subvolume_path}")
+                return False
+            
             # Crea qgroup se non esiste
-            run([
-                "btrfs", "qgroup", "create", "1/0", subvolume_path
-            ], check=False)
+            qgroup_id = f"0/{subvol_id}"
+            run(["btrfs", "qgroup", "create", qgroup_id, base_path], check=False)
             
             # Imposta limite
-            run([
-                "btrfs", "qgroup", "limit", size, subvolume_path
-            ])
+            run(["btrfs", "qgroup", "limit", size, qgroup_id, base_path])
+            
+            print(f"✅ Quota btrfs impostata: {size} per subvolume {username} (qgroup {qgroup_id})")
             return True
+            
         except RuntimeError as e:
-            print(f"Errore quota BTRFS: {e}")
+            print(f"Errore quota BTRFS per {username}: {e}")
             return False
     
     def _set_posix_quota(self, username: str, soft_limit: str, hard_limit: str) -> bool:
@@ -109,32 +147,64 @@ class QuotaManager:
         fs_type = self._detect_filesystem_type(path)
         
         if fs_type == "btrfs":
-            return self._get_btrfs_quota(f"{path}/{username}")
+            return self._get_btrfs_quota(username, path)
         elif fs_type in ["ext4", "ext3", "xfs"]:
             return self._get_posix_quota(username)
         else:
             return None
     
-    def _get_btrfs_quota(self, subvolume_path: str) -> Optional[Dict]:
-        """Recupera quota BTRFS"""
+    def _user_exists(self, username: str) -> bool:
+        """Verifica se un utente esiste nel sistema"""
         try:
+            pwd.getpwnam(username)
+            return True
+        except KeyError:
+            return False
+    
+    def _get_btrfs_quota(self, username: str, base_path: str = "/home") -> Optional[Dict]:
+        """Recupera quota BTRFS per subvolume utente"""
+        try:
+            subvolume_path = f"{base_path}/{username}"
+            
+            # Verifica che sia un subvolume btrfs
+            result = run(["btrfs", "subvolume", "show", subvolume_path], check=False)
+            if "ERROR" in result or "not a subvolume" in result.lower():
+                return None
+                
+            # Ottieni informazioni qgroup
             output = run([
-                "btrfs", "qgroup", "show", "-p", "-c", subvolume_path
+                "btrfs", "qgroup", "show", "-p", "-c", base_path
             ])
             
-            # Parsing output btrfs qgroup show
+            # Parsing output btrfs qgroup show per trovare quota utente
             for line in output.split('\n'):
-                if '1/0' in line:
+                if username in line or subvolume_path in line:
+                    # Cerca pattern con usage e limit
                     parts = line.split()
                     if len(parts) >= 3:
-                        return {
-                            "used": self._bytes_to_human(int(parts[1])),
-                            "soft_limit": self._bytes_to_human(int(parts[2])) if parts[2] != 'none' else None,
-                            "hard_limit": self._bytes_to_human(int(parts[2])) if parts[2] != 'none' else None,
-                            "filesystem": "btrfs"
-                        }
-        except:
-            pass
+                        used_bytes = 0
+                        limit_bytes = 0
+                        
+                        # Estrai valori numerici
+                        for part in parts:
+                            if part.isdigit():
+                                if used_bytes == 0:
+                                    used_bytes = int(part)
+                                elif limit_bytes == 0:
+                                    limit_bytes = int(part)
+                                    break
+                        
+                        if limit_bytes > 0:
+                            return {
+                                "used": self._bytes_to_human(used_bytes),
+                                "soft_limit": self._bytes_to_human(limit_bytes),
+                                "hard_limit": self._bytes_to_human(limit_bytes),
+                                "filesystem": "btrfs",
+                                "subvolume": subvolume_path
+                            }
+                            
+        except Exception as e:
+            print(f"Errore lettura quota btrfs per {username}: {e}")
         return None
     
     def _get_posix_quota(self, username: str) -> Optional[Dict]:
