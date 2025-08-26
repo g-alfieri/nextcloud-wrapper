@@ -99,48 +99,31 @@ class WebDAVMountManager:
                 print(f"📦 Backup configurazione: {backup_path}")
             
             # Configurazione ottimizzata per Nextcloud
-            config_content = f"""# Configurazione davfs2 ottimizzata per Nextcloud
+            config_content = f"""# Configurazione davfs2 per Nextcloud
 # Generata da nextcloud-wrapper v0.3.0
 
-# Davfs2 configuration file
-# Questo file deve essere modificato per ogni installazione specifica
+# Basic davfs2 configuration - compatible with all versions
 
 # Cache settings
 cache_size {self.config['cache_size']}
-table_size 4096
-delay_upload 0
-guess_mime_type 1
 
-# Timeouts (in seconds)
+# Timeouts (seconds)
 connect_timeout {self.config['connect_timeout']}
 read_timeout {self.config['read_timeout']}
-retry {self.config['retry_count']}
-max_retry 10
 
-# Cache directory (must exist and be writable by davfs2)
+# Cache directory
 cache_dir {self.cache_dir}
 
-# Lock settings
+# Security settings
 use_locks {1 if self.config['use_locks'] else 0}
-lock_timeout 300
 
 # File permissions
 umask {self.config['umask']}
-file_mode {self.config['file_mode']}
-dir_mode {self.config['dir_mode']}
 
-# Network settings
-use_expect100 0
-n_cookies 0
-
-# Debugging (uncomment for troubleshooting)
-# debug config,kernel,cache,http_auth,xml,httpbody
-
-# Trust server certificate (set to 1 only for testing with self-signed certs)
+# Trust server certificate (0=verify, 1=trust all - use only for testing)
 trust_server_cert 0
 
-# Buffer size for network operations  
-buf_size 16384
+# End of configuration
 """
             
             # Crea directory configurazione se non esiste
