@@ -117,11 +117,13 @@ cache_dir {self.cache_dir}
 # Security settings
 use_locks {1 if self.config['use_locks'] else 0}
 
-# File permissions
-umask {self.config['umask']}
+# SSL/TLS Certificate handling
+# Accetta certificati del server (necessario per la maggior parte dei server Nextcloud)
+accept_sslcert 1
+trust_server_cert 1
 
-# Trust server certificate (0=verify, 1=trust all - use only for testing)
-trust_server_cert 0
+# File permissions (commentato - può causare problemi su alcuni sistemi)
+# umask {self.config['umask']}
 
 # End of configuration
 """
