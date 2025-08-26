@@ -9,14 +9,41 @@ from .utils import validate_domain
 
 def get_nc_config() -> Tuple[str, str, str]:
     """Recupera configurazione Nextcloud dalle variabili d'ambiente"""
+    # Prova a caricare file .env se le variabili non sono già impostate
     base_url = os.environ.get("NC_BASE_URL")
-    admin_user = os.environ.get("NC_ADMIN_USER")  
+    admin_user = os.environ.get("NC_ADMIN_USER")
     admin_pass = os.environ.get("NC_ADMIN_PASS")
     
+    # Se mancano variabili, prova a caricare da file .env
     if not all([base_url, admin_user, admin_pass]):
-        raise ValueError(
-            "Variabili d'ambiente mancanti: NC_BASE_URL, NC_ADMIN_USER, NC_ADMIN_PASS"
-        )
+        from .utils import find_and_load_env
+        if find_and_load_env():
+            # Riprova dopo aver caricato il file .env
+            base_url = os.environ.get("NC_BASE_URL")
+            admin_user = os.environ.get("NC_ADMIN_USER")
+            admin_pass = os.environ.get("NC_ADMIN_PASS")
+    
+    if not all([base_url, admin_user, admin_pass]):
+        missing_vars = []
+        if not base_url:
+            missing_vars.append("NC_BASE_URL")
+        if not admin_user:
+            missing_vars.append("NC_ADMIN_USER")
+        if not admin_pass:
+            missing_vars.append("NC_ADMIN_PASS")
+            
+        error_msg = f"Variabili d'ambiente mancanti: {', '.join(missing_vars)}"
+        error_msg += "\n\n💡 Soluzioni:"
+        error_msg += "\n1. Crea file .env nella directory corrente con:"
+        error_msg += "\n   NC_BASE_URL=https://your-nextcloud.example.com"
+        error_msg += "\n   NC_ADMIN_USER=admin"
+        error_msg += "\n   NC_ADMIN_PASS='your_password'"
+        error_msg += "\n\n2. Oppure imposta le variabili d'ambiente:"
+        error_msg += "\n   export NC_BASE_URL='https://your-nextcloud.example.com'"
+        error_msg += "\n   export NC_ADMIN_USER='admin'"
+        error_msg += "\n   export NC_ADMIN_PASS='your_password'"
+        
+        raise ValueError(error_msg)
     
     return base_url.rstrip("/"), admin_user, admin_pass
 

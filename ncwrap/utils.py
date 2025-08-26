@@ -360,3 +360,50 @@ def verify_password_hash(password: str, hash_str: str) -> bool:
         return hash_obj.hex() == stored_hash
     except:
         return False
+
+
+def load_env_file(env_file: str = '.env') -> bool:
+    """Carica file .env nelle variabili d'ambiente"""
+    try:
+        if not os.path.exists(env_file):
+            return False
+        
+        with open(env_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Ignora commenti e righe vuote
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Rimuovi virgolette se presenti
+                    if value.startswith('"') and value.endswith('"'):
+                        value = value[1:-1]
+                    elif value.startswith("'") and value.endswith("'"):
+                        value = value[1:-1]
+                    
+                    # Imposta variabile d'ambiente
+                    os.environ[key] = value
+        
+        return True
+        
+    except Exception:
+        return False
+
+
+def find_and_load_env() -> bool:
+    """Trova e carica file .env dalle directory comuni"""
+    env_locations = [
+        '.env',  # Directory corrente
+        os.path.expanduser('~/.env'),  # Home directory
+        os.path.expanduser('~/.nextcloud-wrapper/.env'),  # Config directory
+        '/etc/nextcloud-wrapper/.env',  # System config
+        os.path.join(os.path.dirname(__file__), '..', '.env')  # Project root
+    ]
+    
+    for env_file in env_locations:
+        if load_env_file(env_file):
+            return True
+    
+    return False
