@@ -102,39 +102,45 @@ class WebDAVMountManager:
             config_content = f"""# Configurazione davfs2 ottimizzata per Nextcloud
 # Generata da nextcloud-wrapper v0.3.0
 
-# Performance
+# Davfs2 configuration file
+# Questo file deve essere modificato per ogni installazione specifica
+
+# Cache settings
 cache_size {self.config['cache_size']}
 table_size 4096
-file_refresh 30
-dir_refresh 60
+delay_upload 0
+guess_mime_type 1
 
-# Timeouts
+# Timeouts (in seconds)
 connect_timeout {self.config['connect_timeout']}
 read_timeout {self.config['read_timeout']}
 retry {self.config['retry_count']}
 max_retry 10
 
-# Cache directory
+# Cache directory (must exist and be writable by davfs2)
 cache_dir {self.cache_dir}
-backup_dir lost+found
 
-# Security
+# Lock settings
 use_locks {1 if self.config['use_locks'] else 0}
 lock_timeout 300
 
-# Permessi
+# File permissions
 umask {self.config['umask']}
 file_mode {self.config['file_mode']}
 dir_mode {self.config['dir_mode']}
 
-# Ottimizzazioni Nextcloud
-if_match_bug 1
-drop_weak_etags 1
+# Network settings
 use_expect100 0
 n_cookies 0
 
-# Logging (per debug)
-# debug most
+# Debugging (uncomment for troubleshooting)
+# debug config,kernel,cache,http_auth,xml,httpbody
+
+# Trust server certificate (set to 1 only for testing with self-signed certs)
+trust_server_cert 0
+
+# Buffer size for network operations  
+buf_size 16384
 """
             
             # Crea directory configurazione se non esiste
@@ -152,6 +158,57 @@ n_cookies 0
             
         except Exception as e:
             print(f"❌ Errore configurazione davfs2: {e}")
+            return False
+    
+    def test_davfs2_config(self) -> bool:
+        """Testa la configurazione davfs2"""
+        try:
+            davfs_conf = self.davfs_config_dir / "davfs2.conf"
+            
+            if not davfs_conf.exists():
+                print("⚠️ File configurazione davfs2 non trovato")
+                return False
+            
+            # Test parsing del file di configurazione
+            # Eseguiamo mount.davfs --help per vedere se funziona
+            result = run(["mount.davfs", "--help"], check=False)
+            
+            if "mount.davfs" in result:
+                print("✅ mount.davfs funzionante")
+                return True
+            else:
+                print("❌ mount.davfs non funziona correttamente")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Errore test configurazione: {e}")
+            return False
+    
+    def fix_davfs2_permissions(self) -> bool:
+        """Corregge i permessi per davfs2"""
+        try:
+            # Assicurati che l'utente sia nel gruppo davfs2
+            run(["usermod", "-a", "-G", "davfs2", "root"], check=False)
+            
+            # Permessi directory cache
+            if self.cache_dir.exists():
+                run(["chmod", "755", str(self.cache_dir)], check=False)
+                run(["chown", "root:root", str(self.cache_dir)], check=False)
+            
+            # Permessi file configurazione
+            davfs_conf = self.davfs_config_dir / "davfs2.conf"
+            if davfs_conf.exists():
+                run(["chmod", "644", str(davfs_conf)], check=False)
+            
+            secrets_file = self.davfs_config_dir / "secrets"
+            if secrets_file.exists():
+                run(["chmod", "600", str(secrets_file)], check=False)
+                run(["chown", "root:root", str(secrets_file)], check=False)
+            
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ Errore correzione permessi: {e}")
             return False
     
     def setup_user_credentials(self, username: str, password: str, webdav_url: str) -> bool:
@@ -297,6 +354,15 @@ n_cookies 0
             if not self.setup_user_credentials(username, password, webdav_url):
                 return False
             
+            # Test e correggi configurazione davfs2
+            print("🔍 Test configurazione davfs2...")
+            if not self.test_davfs2_config():
+                print("🔧 Correzione configurazione davfs2...")
+                self.fix_davfs2_permissions()
+                
+                # Ricrea configurazione con opzioni di base
+                self.configure_davfs2()
+            
             # Backup home esistente
             backup_path = self.backup_existing_home(home_path, username)
             
@@ -314,9 +380,52 @@ n_cookies 0
                 "-o", f"uid={uid},gid={gid},rw,user,noauto"
             ]
             
-            run(mount_cmd)
-            
-            print(f"✅ WebDAV montato: {webdav_url} → {home_path}")
+            try:
+                run(mount_cmd)
+                print(f"✅ WebDAV montato: {webdav_url} → {home_path}")
+            except RuntimeError as e:
+                print(f"⚠️ Primo tentativo mount fallito: {e}")
+                print("🔧 Provo con opzioni semplificate...")
+                
+                # Tentativo con opzioni più semplici
+                simple_mount_cmd = [
+                    "mount", "-t", "davfs",
+                    webdav_url,
+                    home_path
+                ]
+                
+                try:
+                    run(simple_mount_cmd)
+                    print(f"✅ WebDAV montato (modalità semplice): {webdav_url} → {home_path}")
+                    
+                    # Correggi permessi post-mount
+                    run(["chown", f"{uid}:{gid}", home_path], check=False)
+                    run(["chmod", "755", home_path], check=False)
+                    
+                except RuntimeError as mount_error:
+                    print(f"❌ Anche il mount semplice è fallito: {mount_error}")
+                    
+                    # Informazioni di debug
+                    print("📊 Debug info:")
+                    print(f"   URL: {webdav_url}")
+                    print(f"   Mount point: {home_path}")
+                    print(f"   UID/GID: {uid}/{gid}")
+                    
+                    # Test connettività WebDAV
+                    from .api import test_webdav_connectivity
+                    if test_webdav_connectivity(username, password):
+                        print("   ✅ Connettività WebDAV OK")
+                    else:
+                        print("   ❌ Connettività WebDAV fallita")
+                    
+                    # Suggerimenti
+                    print("💡 Suggerimenti:")
+                    print("   1. Verifica che davfs2 sia installato: mount.davfs --version")
+                    print("   2. Controlla i log: journalctl -u systemd-logind")
+                    print("   3. Test manuale: mount -t davfs [URL] [PATH]")
+                    print(f"   4. Verifica URL: {webdav_url}")
+                    
+                    return False
             
             # Ripristina file importanti se esisteva backup
             if backup_path:
