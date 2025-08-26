@@ -38,25 +38,54 @@ class WebDAVMountManager:
             return True
         
         print("📦 Installando davfs2...")
-        try:
-            # Prova Ubuntu/Debian
-            run(["apt", "update"], check=False)
-            run(["apt", "install", "-y", "davfs2"])
-            return True
-        except RuntimeError:
-            try:
-                # Prova CentOS/RHEL
-                run(["yum", "install", "-y", "davfs2"])
-                return True
-            except RuntimeError:
+        
+        # Rileva il sistema operativo e package manager
+        package_managers = [
+            # Fedora, RHEL 8+, CentOS 8+
+            {"cmd": "dnf", "install": ["dnf", "install", "-y", "davfs2"]},
+            # Ubuntu, Debian
+            {"cmd": "apt", "install": ["apt", "install", "-y", "davfs2"], "update": ["apt", "update"]},
+            # CentOS 7, RHEL 7
+            {"cmd": "yum", "install": ["yum", "install", "-y", "davfs2"]},
+            # openSUSE
+            {"cmd": "zypper", "install": ["zypper", "install", "-y", "davfs2"]},
+            # Arch Linux
+            {"cmd": "pacman", "install": ["pacman", "-S", "--noconfirm", "davfs2"]},
+        ]
+        
+        for pm in package_managers:
+            if is_command_available(pm["cmd"]):
                 try:
-                    # Prova Fedora
-                    run(["dnf", "install", "-y", "davfs2"])
-                    return True
-                except RuntimeError:
-                    print("❌ Impossibile installare davfs2 automaticamente")
-                    print("Installa manualmente: apt install davfs2 o yum install davfs2")
-                    return False
+                    print(f"⚙️ Usando {pm['cmd']} per installare davfs2...")
+                    
+                    # Esegui update se specificato (per apt)
+                    if "update" in pm:
+                        print(f"🔄 Aggiornamento repository con {pm['cmd']}...")
+                        run(pm["update"], check=False)
+                    
+                    # Installa il pacchetto
+                    run(pm["install"])
+                    
+                    # Verifica installazione
+                    if is_command_available("mount.davfs"):
+                        print("✅ davfs2 installato con successo")
+                        return True
+                    else:
+                        print(f"⚠️ Installazione completata ma mount.davfs non trovato")
+                        
+                except RuntimeError as e:
+                    print(f"❌ Errore con {pm['cmd']}: {e}")
+                    continue
+        
+        # Se arriviamo qui, nessun package manager ha funzionato
+        print("❌ Impossibile installare davfs2 automaticamente")
+        print("💡 Installa manualmente:")
+        print("   Fedora/RHEL/CentOS: dnf install davfs2")
+        print("   Ubuntu/Debian: apt install davfs2")
+        print("   openSUSE: zypper install davfs2")
+        print("   Arch Linux: pacman -S davfs2")
+        
+        return False
     
     def configure_davfs2(self) -> bool:
         """Configura davfs2 per uso ottimale con Nextcloud"""
