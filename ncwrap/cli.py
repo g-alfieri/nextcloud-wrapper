@@ -40,12 +40,32 @@ except ImportError:
 from .api import get_nc_config
 from .utils import check_sudo_privileges
 
+def version_callback(value: bool):
+    """Callback per --version flag globale"""
+    if value:
+        from . import __version__
+        rprint(f"[bold blue]Nextcloud Wrapper v{__version__}[/bold blue]")
+        rprint("[cyan]Backend: WebDAV Direct Mount[/cyan]")
+        raise typer.Exit()
+
 app = typer.Typer(
     name="nextcloud-wrapper",
     help="Wrapper v0.3.0 per gestione Nextcloud con WebDAV diretto, quote e utenti",
     add_completion=False
 )
 console = Console()
+
+# Aggiungi opzione --version globale
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None, "--version", "-v", 
+        help="Mostra versione del programma", 
+        callback=version_callback,
+        is_eager=True
+    )
+):
+    """Nextcloud Wrapper v0.3.0 - WebDAV Direct Backend"""
 
 # Aggiungi sotto-comandi (solo se importati con successo)
 if setup_app:
