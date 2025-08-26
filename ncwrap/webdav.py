@@ -101,29 +101,54 @@ class WebDAVMountManager:
             # Configurazione ottimizzata per Nextcloud
             config_content = f"""# Configurazione davfs2 per Nextcloud
 # Generata da nextcloud-wrapper v0.3.0
-
-# Basic davfs2 configuration - compatible with all versions
+# Compatibile con davfs2 Fedora
 
 # Cache settings
 cache_size {self.config['cache_size']}
+table_size 1024
 
 # Timeouts (seconds)
 connect_timeout {self.config['connect_timeout']}
 read_timeout {self.config['read_timeout']}
 
+# Retry settings
+retry {self.config['retry_count']}
+max_retry 300
+
 # Cache directory
 cache_dir {self.cache_dir}
+backup_dir lost+found
 
-# Security settings
+# Lock settings
 use_locks {1 if self.config['use_locks'] else 0}
+lock_timeout 1800
 
 # SSL/TLS Certificate handling
-# Accetta certificati del server (necessario per la maggior parte dei server Nextcloud)
-accept_sslcert 1
-trust_server_cert 1
+# Per server con certificati self-signed o problemi SSL
+# Lasciare commentato se si vuole verifica completa SSL
+# trust_server_cert /etc/ssl/certs/ca-certificates.crt
 
-# File permissions (commentato - può causare problemi su alcuni sistemi)
-# umask {self.config['umask']}
+# Authentication
+ask_auth 0
+
+# HTTP optimizations for Nextcloud
+use_expect100 0
+if_match_bug 1
+drop_weak_etags 1
+n_cookies 0
+precheck 1
+use_compression 1
+
+# Upload settings
+delay_upload 10
+max_upload_attempts 15
+
+# Directory and file refresh
+dir_refresh 60
+file_refresh 1
+
+# Buffer size (KiB)
+buf_size 16
 
 # End of configuration
 """
