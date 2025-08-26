@@ -625,3 +625,4 @@ set_btrfs_quota = lambda path, size: QuotaManager()._set_btrfs_quota(path, size)
 set_ext4_quota = lambda user, size: QuotaManager()._set_posix_quota(user, size, size)
 get_filesystem_usage = lambda path="/home": QuotaManager().get_filesystem_usage(path)
 setup_quota_system = lambda: QuotaManager().setup_quota_system()
+list_all_quotas = list_all_user_quotas  # Alias per compatibilità

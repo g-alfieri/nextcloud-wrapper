@@ -367,7 +367,7 @@ def show_activation_info():
         rprint("💡 Crea prima l'environment: nextcloud-wrapper venv setup")
         sys.exit(1)
     
-    rprint(f"[bold]🐍 Per attivare manualmente l'environment:{/bold]")
+    rprint(f"[bold]🐍 Per attivare manualmente l'environment:[/bold]")
     rprint(f"   conda activate {env_name}")
     
     rprint(f"\n[bold]📋 Per caricare configurazione:[/bold]")

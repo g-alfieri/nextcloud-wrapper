@@ -742,3 +742,7 @@ def auto_repair_services() -> Dict:
             repair_results["still_broken"].append(f"{service_name}: {str(e)}")
     
     return repair_results
+
+
+# Alias aggiuntivi per compatibilità
+get_all_nextcloud_services = list_all_webdav_services
