@@ -87,12 +87,16 @@ class QuotaManager:
                 "btrfs", "qgroup", "create", "1/0", subvolume_path
             ], check=False)
             
+            # Converti formato size per BTRFS (che accetta solo bytes o formato specifico)
+            size_bytes = parse_size_to_bytes(size)
+            btrfs_size = str(size_bytes)  # BTRFS vuole solo il numero di bytes
+            
             # Imposta limite
             run([
-                "btrfs", "qgroup", "limit", size, subvolume_path
+                "btrfs", "qgroup", "limit", btrfs_size, subvolume_path
             ])
             
-            print(f"✅ Quota BTRFS impostata: {subvolume_path} = {size}")
+            print(f"✅ Quota BTRFS impostata: {subvolume_path} = {size} ({btrfs_size} bytes)")
             return True
             
         except RuntimeError as e:
@@ -483,7 +487,18 @@ def setup_quota_for_user(username: str, nextcloud_quota: str, fs_percentage: flo
         from .api import set_nc_quota
         try:
             # Converte formato per Nextcloud (spazi tra numero e unità)
-            nc_quota_formatted = nextcloud_quota.replace("G", " GB").replace("M", " MB").replace("T", " TB")
+            # Nextcloud accetta formati come "100 GB", "50 MB", "1 TB"
+            if nextcloud_quota.endswith('G'):
+                nc_quota_formatted = nextcloud_quota.replace('G', ' GB')
+            elif nextcloud_quota.endswith('M'):
+                nc_quota_formatted = nextcloud_quota.replace('M', ' MB')
+            elif nextcloud_quota.endswith('T'):
+                nc_quota_formatted = nextcloud_quota.replace('T', ' TB')
+            elif nextcloud_quota.endswith('K'):
+                nc_quota_formatted = nextcloud_quota.replace('K', ' KB')
+            else:
+                nc_quota_formatted = nextcloud_quota  # Assume già formato corretto
+                
             set_nc_quota(username, nc_quota_formatted)
             print(f"✅ Quota Nextcloud: {nc_quota_formatted}")
         except Exception as e:
@@ -496,6 +511,7 @@ def setup_quota_for_user(username: str, nextcloud_quota: str, fs_percentage: flo
             return True
         else:
             print(f"❌ Errore quota filesystem")
+            print(f"Debug: fs_quota={fs_quota}, fs_bytes={fs_bytes}")
             return False
             
     except Exception as e:

@@ -76,38 +76,7 @@ class SystemdManager:
         else:
             raise RuntimeError(f"Errore creazione file servizio: {service_file}")
     
-    def create_backup_service(self, username: str, interval: str = "daily") -> str:
-        """
-        Crea servizio + timer per backup automatico
-        
-        Args:
-            username: Nome utente
-            interval: Intervallo backup (hourly, daily, weekly, monthly)
-            
-        Returns:
-            Nome del servizio creato
-        """
-        service_name = f"nextcloud-backup-{username}"
-        
-        # Crea servizio backup
-        service_content = self._generate_backup_service_config(username)
-        timer_content = self._generate_timer_config(interval, service_name)
-        
-        # Scrivi file servizio e timer
-        service_file = self.system_dir / f"{service_name}.service"
-        timer_file = self.system_dir / f"{service_name}.timer"
-        
-        if not atomic_write(str(service_file), service_content, 0o644):
-            raise RuntimeError(f"Errore creazione servizio: {service_file}")
-        
-        if not atomic_write(str(timer_file), timer_content, 0o644):
-            raise RuntimeError(f"Errore creazione timer: {timer_file}")
-        
-        # Reload systemd
-        self._reload_systemd()
-        
-        print(f"✅ Servizio backup creato: {service_name} ({interval})")
-        return service_name
+    # create_backup_service rimosso - backup gestito esternamente
     
     def create_sync_service(self, username: str, source: str, dest: str,
                            schedule: str = "hourly", user: bool = False) -> str:
@@ -380,8 +349,9 @@ RemainAfterExit=yes
 User=root
 Group=root
 ExecStartPre=/bin/mkdir -p {mount_point}
+ExecStartPre=/bin/bash -c 'if mountpoint -q {mount_point}; then echo "Already mounted: {mount_point}"; exit 0; fi'
 ExecStart=/bin/mount -t davfs {webdav_url} {mount_point} -o uid={uid},gid={gid},rw,user,noauto
-ExecStop=/bin/umount {mount_point}
+ExecStop=/bin/bash -c 'if mountpoint -q {mount_point}; then /bin/umount {mount_point}; fi'
 TimeoutSec={self.config['timeout']}
 Restart=no
 
@@ -389,26 +359,7 @@ Restart=no
 WantedBy=multi-user.target
 """
     
-    def _generate_backup_service_config(self, username: str) -> str:
-        """Genera configurazione servizio backup"""
-        
-        backup_dir = f"/var/backups/nextcloud/{username}"
-        home_dir = f"/home/{username}"
-        
-        return f"""[Unit]
-Description=Nextcloud backup for {username}
-After=network.target
-
-[Service]
-Type=oneshot
-User=root
-Group=root
-ExecStartPre=/bin/mkdir -p {backup_dir}
-ExecStart=/bin/tar -czf {backup_dir}/backup-$(date +\\%Y\\%m\\%d-\\%H\\%M\\%S).tar.gz -C {home_dir} .
-ExecStartPost=/bin/find {backup_dir} -name "backup-*.tar.gz" -mtime +7 -delete
-StandardOutput=journal
-StandardError=journal
-"""
+    # _generate_backup_service_config rimosso - backup gestito esternamente
     
     def _generate_sync_service_config(self, source: str, dest: str, username: str) -> str:
         """Genera configurazione servizio sync"""

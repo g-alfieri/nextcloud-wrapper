@@ -26,7 +26,7 @@ def user(
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare login WebDAV"),
     auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd automatico"),
-    backup_service: bool = typer.Option(False, "--backup", help="Crea servizio backup automatico")
+    # Rimossa opzione backup - gestito a livello superiore
 ):
     """
     Setup completo utente con WebDAV diretto nella home directory
@@ -95,18 +95,7 @@ def user(
             except Exception as e:
                 rprint(f"[yellow]⚠️ Avviso servizio systemd: {e}[/yellow]")
         
-        # 5. Servizio backup opzionale
-        if backup_service:
-            rprint("[yellow]5️⃣ Configurazione backup automatico...[/yellow]")
-            try:
-                systemd_manager = SystemdManager()
-                backup_service_name = systemd_manager.create_backup_service(username)
-                
-                if systemd_manager.enable_service(backup_service_name):
-                    rprint(f"[green]✅ Backup automatico: {backup_service_name}[/green]")
-                    
-            except Exception as e:
-                rprint(f"[yellow]⚠️ Avviso backup automatico: {e}[/yellow]")
+        # 5. (Backup rimosso - gestito esternamente)
         
         # Riepilogo finale
         rprint(f"\n[bold green]🎉 Setup completato con successo per {username}![/bold green]")
