@@ -348,7 +348,7 @@ buf_size 16
             home_path: Path home custom (default: /home/username)
             
         Returns:
-            True se mount riuscito
+            True se mount riuscito o già esistente
         """
         if not home_path:
             home_path = f"/home/{username}"
@@ -360,6 +360,18 @@ buf_size 16
             print(f"🔗 Montando WebDAV {username} in {home_path}")
             print(f"URL: {webdav_url}")
             
+            # ✅ CONTROLLO MOUNT ESISTENTE PRIMA DI TENTARE MOUNT
+            if is_mounted(home_path):
+                print(f"✅ WebDAV già montato in {home_path}")
+                # Verifica che sia davfs2 mount
+                mount_output = run(["mount"], check=False)
+                if "davfs" in mount_output and home_path in mount_output:
+                    print(f"✅ Mount WebDAV esistente confermato: {home_path}")
+                    return True
+                else:
+                    print(f"⚠️ Directory montata ma non davfs2, tentativo smount...")
+                    self.unmount_webdav(home_path)
+            
             # Setup credenziali
             if not self.setup_user_credentials(username, password, webdav_url):
                 return False
@@ -369,8 +381,6 @@ buf_size 16
             if not self.test_davfs2_config():
                 print("🔧 Correzione configurazione davfs2...")
                 self.fix_davfs2_permissions()
-                
-                # Ricrea configurazione con opzioni di base
                 self.configure_davfs2()
             
             # Backup home esistente
@@ -382,7 +392,7 @@ buf_size 16
             # Ottieni UID/GID utente
             uid, gid = get_user_uid_gid(username)
             
-            # Mount WebDAV
+            # Mount WebDAV con gestione errori migliorata
             mount_cmd = [
                 "mount", "-t", "davfs",
                 webdav_url,
@@ -394,15 +404,18 @@ buf_size 16
                 run(mount_cmd)
                 print(f"✅ WebDAV montato: {webdav_url} → {home_path}")
             except RuntimeError as e:
+                error_msg = str(e).lower()
+                
+                # ✅ GESTIONE SPECIALE: Mount già esistente
+                if "already mounted" in error_msg:
+                    print(f"✅ WebDAV già montato (rilevato da mount.davfs): {home_path}")
+                    return True
+                
                 print(f"⚠️ Primo tentativo mount fallito: {e}")
                 print("🔧 Provo con opzioni semplificate...")
                 
                 # Tentativo con opzioni più semplici
-                simple_mount_cmd = [
-                    "mount", "-t", "davfs",
-                    webdav_url,
-                    home_path
-                ]
+                simple_mount_cmd = ["mount", "-t", "davfs", webdav_url, home_path]
                 
                 try:
                     run(simple_mount_cmd)
@@ -413,6 +426,13 @@ buf_size 16
                     run(["chmod", "755", home_path], check=False)
                     
                 except RuntimeError as mount_error:
+                    mount_error_msg = str(mount_error).lower()
+                    
+                    # ✅ GESTIONE SPECIALE: Mount già esistente nel secondo tentativo
+                    if "already mounted" in mount_error_msg:
+                        print(f"✅ WebDAV già montato (confermato dal secondo tentativo): {home_path}")
+                        return True
+                    
                     print(f"❌ Anche il mount semplice è fallito: {mount_error}")
                     
                     # Informazioni di debug
