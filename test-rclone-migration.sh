@@ -75,6 +75,10 @@ fi
 echo ""
 echo "3️⃣ Test setup utente con rclone..."
 
+# DELAY per evitare rate limiting
+echo "⏳ Attesa 3s per evitare rate limiting..."
+sleep 3
+
 # Setup completo con rclone
 if nextcloud-wrapper setup user "$TEST_USER" "$TEST_PASSWORD" \
     --quota "$TEST_QUOTA" \
@@ -89,6 +93,10 @@ fi
 
 echo ""
 echo "4️⃣ Verifica mount rclone..."
+
+# DELAY per permettere al mount di stabilizzarsi
+echo "⏳ Attesa 5s per stabilizzazione mount..."
+sleep 5
 
 # Verifica mount
 if nextcloud-wrapper mount status | grep -q "$TEST_USER"; then

@@ -6,7 +6,7 @@ import subprocess
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
-from .utils import run, ensure_dir
+from .utils import run, ensure_dir, run_with_retry
 
 # Configurazione globale
 RCLONE_CONF = Path.home() / ".config" / "ncwrap" / "rclone.conf"
@@ -352,15 +352,18 @@ def list_files(remote_path: str, max_depth: int = 1) -> List[str]:
         return []
 
 
-def check_connectivity(remote_name: str) -> bool:
-    """Testa connettività con un remote"""
+def check_connectivity(remote_name: str, timeout: int = 30) -> bool:
+    """Testa connettività con un remote con retry automatico per rate limiting"""
     try:
-        run([
+        run_with_retry([
             "rclone", "lsd", f"{remote_name}:/",
-            "--config", str(RCLONE_CONF)
-        ])
+            "--config", str(RCLONE_CONF),
+            "--timeout", f"{timeout}s",
+            "--retries", "1"  # rclone retry interno disabilitato, gestiamo noi
+        ], max_retries=3, delay_base=2.0)
         return True
-    except:
+    except Exception as e:
+        print(f"❌ Test remote fallito: {e}")
         return False
 
 

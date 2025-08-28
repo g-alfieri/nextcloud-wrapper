@@ -4,7 +4,76 @@ API Nextcloud - gestione utenti e cartelle via OCS e WebDAV
 import os
 import requests
 from typing import Tuple, List, Optional
-from .utils import validate_domain
+from .utils import validate_domain, run_with_retry
+import time
+import random
+
+
+def make_request_with_retry(method: str, url: str, max_retries: int = 3, 
+                           delay_base: float = 2.0, **kwargs) -> requests.Response:
+    """
+    Fa richieste HTTP con retry automatico per rate limiting
+    
+    Args:
+        method: Metodo HTTP (GET, POST, etc.)
+        url: URL della richiesta
+        max_retries: Numero massimo retry
+        delay_base: Delay base in secondi
+        **kwargs: Parametri aggiuntivi per requests
+        
+    Returns:
+        Response object
+        
+    Raises:
+        requests.RequestException: Se tutti i tentativi falliscono
+    """
+    last_exception = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.request(method, url, **kwargs)
+            
+            # Se è 429 (Too Many Requests), retry con backoff
+            if response.status_code == 429:
+                if attempt < max_retries:
+                    delay = delay_base * (2 ** attempt)  # Backoff esponenziale
+                    jitter = random.uniform(0.1, 0.3) * delay  # Jitter per evitare thundering herd
+                    total_delay = delay + jitter
+                    
+                    print(f"⏳ Rate limit (429), attesa {total_delay:.1f}s (tentativo {attempt + 1}/{max_retries + 1})")
+                    time.sleep(total_delay)
+                    continue
+            
+            # Per altri errori HTTP temporanei
+            elif response.status_code in [502, 503, 504]:  # Bad Gateway, Service Unavailable, Gateway Timeout
+                if attempt < max_retries:
+                    delay = delay_base * (1.5 ** attempt)
+                    print(f"⏳ Errore server ({response.status_code}), retry in {delay:.1f}s")
+                    time.sleep(delay)
+                    continue
+            
+            # Risposta ricevuta (anche se con errore HTTP)
+            return response
+            
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_exception = e
+            if attempt < max_retries:
+                delay = delay_base * (1.5 ** attempt)
+                print(f"⏳ Errore rete, retry in {delay:.1f}s (tentativo {attempt + 1}/{max_retries + 1})")
+                time.sleep(delay)
+                continue
+            break
+            
+        except Exception as e:
+            last_exception = e
+            break
+    
+    # Se arriviamo qui, tutti i tentativi sono falliti
+    if last_exception:
+        raise last_exception
+    else:
+        # Fallback: se per qualche motivo non abbiamo un'eccezione ma siamo qui
+        raise requests.RequestException("Tutti i tentativi di richiesta sono falliti")
 
 
 def get_nc_config() -> Tuple[str, str, str]:
@@ -263,7 +332,7 @@ def test_webdav_connectivity(user: str, password: str) -> bool:
 
 def test_webdav_login(user: str, password: str) -> Tuple[int, str]:
     """
-    Test login dell'utente via WebDAV
+    Test login dell'utente via WebDAV con retry automatico per rate limiting
     
     Args:
         user: Username
@@ -275,14 +344,20 @@ def test_webdav_login(user: str, password: str) -> Tuple[int, str]:
     """
     webdav_url = get_webdav_url(user)
     
-    response = requests.request(
-        "PROPFIND",
-        webdav_url,
-        auth=(user, password),
-        headers={"Depth": "0"},
-        timeout=30
-    )
-    return response.status_code, response.text[:500]
+    try:
+        response = make_request_with_retry(
+            "PROPFIND",
+            webdav_url,
+            auth=(user, password),
+            headers={"Depth": "0"},
+            timeout=30,
+            max_retries=3,
+            delay_base=2.0
+        )
+        return response.status_code, response.text[:500]
+    except Exception as e:
+        print(f"❌ Errore test WebDAV: {e}")
+        return 500, str(e)[:500]
 
 
 def create_webdav_folder(path: str, auth_user: str, auth_pass: str) -> int:

@@ -637,9 +637,7 @@ def setup_webdav_user(username: str, password: str, quota: str = None,
     from .system import create_linux_user, user_exists
     if not user_exists(username):
         # Non creare home directory qui, sarà il mount WebDAV
-        if create_linux_user(username, password, create_home=False):
-            print(f"✅ Utente Linux creato: {username}")
-        else:
+        if not create_linux_user(username, password, create_home=False):
             print(f"❌ Errore creazione utente Linux: {username}")
             return False
     else:

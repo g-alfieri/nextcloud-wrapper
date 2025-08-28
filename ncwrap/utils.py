@@ -6,6 +6,8 @@ import subprocess
 import pwd
 import shutil
 import re
+import time
+import random
 from pathlib import Path
 from typing import Tuple, Optional
 
@@ -16,6 +18,82 @@ def run(cmd: list, check: bool = True) -> str:
     if check and result.returncode != 0:
         raise RuntimeError(f"Errore eseguendo {' '.join(cmd)}:\n{result.stderr}")
     return result.stdout.strip()
+
+
+def run_with_retry(cmd: list, max_retries: int = 3, delay_base: float = 1.0, 
+                  backoff_multiplier: float = 2.0, check: bool = True) -> str:
+    """
+    Esegue comando con retry automatico e backoff esponenziale per gestire rate limiting
+    
+    Args:
+        cmd: Comando da eseguire
+        max_retries: Numero massimo tentativi
+        delay_base: Delay base in secondi
+        backoff_multiplier: Moltiplicatore per backoff esponenziale
+        check: Se sollevare eccezione su errore
+        
+    Returns:
+        Output del comando
+        
+    Raises:
+        RuntimeError: Se tutti i tentativi falliscono
+    """
+    last_error = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            # Successo
+            if result.returncode == 0:
+                return result.stdout.strip()
+            
+            # Controllo errori specifici
+            stderr_lower = result.stderr.lower()
+            
+            # Rate limiting (429 Too Many Requests)
+            if "429" in stderr_lower or "too many requests" in stderr_lower:
+                if attempt < max_retries:
+                    # Calcola delay con jitter per evitare thundering herd
+                    delay = delay_base * (backoff_multiplier ** attempt)
+                    jitter = random.uniform(0.1, 0.3) * delay
+                    total_delay = delay + jitter
+                    
+                    print(f"⏳ Rate limit rilevato, attesa {total_delay:.1f}s (tentativo {attempt + 1}/{max_retries + 1})")
+                    time.sleep(total_delay)
+                    continue
+            
+            # Altri errori temporanei
+            elif any(err in stderr_lower for err in ["timeout", "connection", "network"]):
+                if attempt < max_retries:
+                    delay = delay_base * (backoff_multiplier ** attempt)
+                    print(f"⏳ Errore rete, retry in {delay:.1f}s (tentativo {attempt + 1}/{max_retries + 1})")
+                    time.sleep(delay)
+                    continue
+            
+            # Errore non recuperabile
+            last_error = RuntimeError(f"Errore eseguendo {' '.join(cmd)}:\n{result.stderr}")
+            if not check:
+                return result.stdout.strip()
+            break
+            
+        except subprocess.TimeoutExpired:
+            last_error = RuntimeError(f"Timeout eseguendo {' '.join(cmd)}")
+            if attempt < max_retries:
+                delay = delay_base * (backoff_multiplier ** attempt)
+                print(f"⏳ Timeout comando, retry in {delay:.1f}s (tentativo {attempt + 1}/{max_retries + 1})")
+                time.sleep(delay)
+                continue
+            break
+            
+        except Exception as e:
+            last_error = RuntimeError(f"Errore imprevisto eseguendo {' '.join(cmd)}: {e}")
+            break
+    
+    # Se arriviamo qui, tutti i tentativi sono falliti
+    if check and last_error:
+        raise last_error
+    return ""
 
 
 def ensure_dir(path: str) -> None:
