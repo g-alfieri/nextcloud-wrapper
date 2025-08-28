@@ -156,8 +156,6 @@ buf_size {self.config['buf_size']}
 # Ottimizzazioni aggiuntive per cache grande
 # Mantieni metadati in cache più a lungo
 min_propset 30
-# Aumenta la soglia per sync automatico
-sync_interval 60
 
 # End of configuration
 """
