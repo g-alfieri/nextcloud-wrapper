@@ -8,8 +8,8 @@ from rich.table import Table
 from rich import print as rprint
 
 from .webdav import WebDAVMountManager
-from .api import test_webdav_connectivity, test_webdav_login, list_webdav_directory
-from .utils import check_sudo_privileges, is_mounted
+from .api import test_webdav_connectivity, test_webdav_login, list_webdav_directory, get_nc_config
+from .utils import check_sudo_privileges, is_mounted, bytes_to_human, get_directory_size, get_available_space
 
 webdav_app = typer.Typer(help="Gestione mount WebDAV")
 console = Console()
@@ -204,6 +204,252 @@ def show_webdav_config():
         
     except Exception as e:
         rprint(f"[red]❌ Errore: {e}[/red]")
+
+
+@webdav_app.command("space")
+def check_webdav_space(
+    username: str = typer.Argument(help="Nome utente"),
+    mount_point: str = typer.Option(None, "--mount", help="Mount point da verificare (default: /home/username)"),
+    detailed: bool = typer.Option(False, "--detailed", help="Mostra analisi dettagliata per cartella")
+):
+    """Verifica spazio utilizzato su WebDAV e mount point locale"""
+    if not mount_point:
+        mount_point = f"/home/{username}"
+    
+    rprint(f"[blue]📊 Verifica spazio WebDAV per: {username}[/blue]")
+    
+    try:
+        # Verifica spazio mount point locale
+        if is_mounted(mount_point):
+            rprint(f"[green]✅ Mount point attivo: {mount_point}[/green]")
+            
+            # Spazio utilizzato localmente (mount WebDAV)
+            local_used = get_directory_size(mount_point)
+            local_available = get_available_space(mount_point)
+            
+            table = Table(title=f"Spazio WebDAV - {username}")
+            table.add_column("Posizione", style="cyan")
+            table.add_column("Spazio Utilizzato", style="white")
+            table.add_column("Spazio Disponibile", style="white")
+            table.add_column("Status", style="green")
+            
+            table.add_row(
+                f"Mount locale\n{mount_point}",
+                bytes_to_human(local_used),
+                bytes_to_human(local_available),
+                "🟢 WebDAV attivo"
+            )
+            
+            console.print(table)
+            
+            # Analisi dettagliata se richiesta
+            if detailed:
+                rprint("\n[blue]📋 Analisi dettagliata per cartella:[/blue]")
+                
+                from pathlib import Path
+                mount_path = Path(mount_point)
+                
+                folder_sizes = []
+                try:
+                    for item in mount_path.iterdir():
+                        if item.is_dir() and not item.name.startswith('.'):
+                            try:
+                                dir_size = get_directory_size(str(item))
+                                folder_sizes.append({
+                                    "name": item.name,
+                                    "size": dir_size
+                                })
+                            except:
+                                continue
+                    
+                    # Ordina per dimensione decrescente
+                    folder_sizes.sort(key=lambda x: x["size"], reverse=True)
+                    
+                    if folder_sizes:
+                        folder_table = Table(title="Cartelle per Dimensione")
+                        folder_table.add_column("Cartella", style="cyan")
+                        folder_table.add_column("Dimensione", style="white")
+                        folder_table.add_column("% del totale", style="yellow")
+                        
+                        for folder in folder_sizes[:10]:  # Top 10
+                            percentage = (folder["size"] / local_used * 100) if local_used > 0 else 0
+                            folder_table.add_row(
+                                folder["name"],
+                                bytes_to_human(folder["size"]),
+                                f"{percentage:.1f}%"
+                            )
+                        
+                        console.print(folder_table)
+                    else:
+                        rprint("[yellow]Nessuna cartella trovata per l'analisi[/yellow]")
+                        
+                except Exception as e:
+                    rprint(f"[red]❌ Errore analisi cartelle: {e}[/red]")
+        else:
+            rprint(f"[red]❌ Mount point non attivo: {mount_point}[/red]")
+            rprint(f"💡 Usa: nextcloud-wrapper webdav mount {username} <password>")
+            
+        # Test connettività WebDAV diretto (opzionale)
+        rprint("\n[blue]🔍 Test connettività WebDAV diretta...[/blue]")
+        
+        base_url, _, _ = get_nc_config()
+        webdav_url = f"{base_url}/remote.php/dav/files/{username}/"
+        rprint(f"[cyan]URL WebDAV: {webdav_url}[/cyan]")
+        
+        # Nota: non possiamo testare senza password, quindi solo info
+        rprint("[yellow]💡 Per test completo WebDAV usa: nextcloud-wrapper webdav test <username> <password>[/yellow]")
+        
+    except Exception as e:
+        rprint(f"[red]💥 Errore verifica spazio: {str(e)}[/red]")
+        sys.exit(1)
+
+
+@webdav_app.command("compare")
+def compare_webdav_space(
+    username1: str = typer.Argument(help="Primo utente da confrontare"),
+    username2: str = typer.Argument(help="Secondo utente da confrontare"),
+    mount_base: str = typer.Option("/home", help="Directory base mount (default: /home)")
+):
+    """Confronta spazio utilizzato tra due utenti WebDAV"""
+    rprint(f"[blue]⚖️ Confronto spazio WebDAV: {username1} vs {username2}[/blue]")
+    
+    try:
+        users_data = []
+        
+        for username in [username1, username2]:
+            mount_point = f"{mount_base}/{username}"
+            
+            if is_mounted(mount_point):
+                used_space = get_directory_size(mount_point)
+                available_space = get_available_space(mount_point)
+                status = "🟢 Attivo"
+            else:
+                used_space = 0
+                available_space = 0
+                status = "🔴 Non montato"
+            
+            users_data.append({
+                "username": username,
+                "mount_point": mount_point,
+                "used": used_space,
+                "available": available_space,
+                "status": status
+            })
+        
+        # Tabella confronto
+        table = Table(title="Confronto Spazio WebDAV")
+        table.add_column("Utente", style="cyan")
+        table.add_column("Mount Point", style="white")
+        table.add_column("Spazio Utilizzato", style="white")
+        table.add_column("Spazio Disponibile", style="white")
+        table.add_column("Status", style="green")
+        
+        for data in users_data:
+            table.add_row(
+                data["username"],
+                data["mount_point"],
+                bytes_to_human(data["used"]),
+                bytes_to_human(data["available"]),
+                data["status"]
+            )
+        
+        console.print(table)
+        
+        # Calcola differenza se entrambi sono montati
+        if all(d["used"] > 0 for d in users_data):
+            diff_bytes = abs(users_data[0]["used"] - users_data[1]["used"])
+            bigger_user = users_data[0]["username"] if users_data[0]["used"] > users_data[1]["used"] else users_data[1]["username"]
+            
+            rprint(f"\n[bold]📊 Differenza di spazio:[/bold]")
+            rprint(f"• {bigger_user} usa {bytes_to_human(diff_bytes)} in più")
+            
+            # Percentuale differenza
+            total_space = users_data[0]["used"] + users_data[1]["used"]
+            if total_space > 0:
+                percentage = (diff_bytes / total_space) * 100
+                rprint(f"• Differenza percentuale: {percentage:.1f}%")
+        
+    except Exception as e:
+        rprint(f"[red]💥 Errore confronto: {str(e)}[/red]")
+        sys.exit(1)
+
+
+@webdav_app.command("df")
+def webdav_disk_usage(
+    mount_base: str = typer.Option("/home", help="Directory base mount (default: /home)")
+):
+    """Mostra uso disco per tutti i mount WebDAV (stile df -h)"""
+    rprint("[blue]💽 Uso disco mount WebDAV[/blue]")
+    
+    try:
+        webdav_manager = WebDAVMountManager()
+        active_mounts = webdav_manager.list_webdav_mounts()
+        
+        if not active_mounts:
+            rprint("[yellow]Nessun mount WebDAV attivo[/yellow]")
+            return
+        
+        table = Table(title="Uso Disco WebDAV (df -h style)")
+        table.add_column("URL WebDAV", style="blue")
+        table.add_column("Mount Point", style="cyan")
+        table.add_column("Utilizzato", style="white")
+        table.add_column("Disponibile", style="white")
+        table.add_column("Uso%", style="yellow")
+        table.add_column("Status", style="green")
+        
+        total_used = 0
+        total_available = 0
+        
+        for mount in active_mounts:
+            mount_point = mount.get("mountpoint", "")
+            url = mount.get("url", "")
+            
+            if is_mounted(mount_point):
+                used_space = get_directory_size(mount_point)
+                available_space = get_available_space(mount_point)
+                total_space = used_space + available_space
+                
+                # Calcola percentuale uso
+                if total_space > 0:
+                    usage_percent = (used_space / total_space) * 100
+                    usage_str = f"{usage_percent:.1f}%"
+                else:
+                    usage_str = "0.0%"
+                
+                status = "🟢 Attivo"
+                total_used += used_space
+                total_available += available_space
+            else:
+                used_space = 0
+                available_space = 0
+                usage_str = "N/A"
+                status = "🔴 Inattivo"
+            
+            table.add_row(
+                url[:50] + "..." if len(url) > 50 else url,
+                mount_point,
+                bytes_to_human(used_space),
+                bytes_to_human(available_space),
+                usage_str,
+                status
+            )
+        
+        console.print(table)
+        
+        # Riepilogo totale
+        if total_used > 0 or total_available > 0:
+            rprint(f"\n[bold]📊 Totale WebDAV:[/bold]")
+            rprint(f"• Spazio utilizzato: {bytes_to_human(total_used)}")
+            rprint(f"• Spazio disponibile: {bytes_to_human(total_available)}")
+            
+            grand_total = total_used + total_available
+            if grand_total > 0:
+                overall_usage = (total_used / grand_total) * 100
+                rprint(f"• Uso complessivo: {overall_usage:.1f}%")
+        
+    except Exception as e:
+        rprint(f"[red]💥 Errore uso disco: {str(e)}[/red]")
+        sys.exit(1)
 
 
 @webdav_app.command("cleanup")
