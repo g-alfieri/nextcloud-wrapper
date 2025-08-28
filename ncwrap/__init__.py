@@ -1,6 +1,6 @@
 """
-Nextcloud Wrapper v0.3.0 - WebDAV Direct Backend
+Nextcloud Wrapper v0.4.0 - rclone Engine & Unified Backend
 """
 
-__version__ = "0.3.0"
-__description__ = "Wrapper Python per gestire Nextcloud con WebDAV diretto, quote e gestione utenti"
+__version__ = "0.4.0"
+__description__ = "Wrapper Python per gestire Nextcloud con engine mount unificato (rclone/davfs2), quote e gestione utenti"

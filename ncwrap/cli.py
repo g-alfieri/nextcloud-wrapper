@@ -23,6 +23,11 @@ except ImportError:
     webdav_app = None
 
 try:
+    from .cli_mount import mount_app
+except ImportError:
+    mount_app = None
+
+try:
     from .cli_quota import quota_app
 except ImportError:
     quota_app = None
@@ -65,13 +70,15 @@ def main(
         is_eager=True
     )
 ):
-    """Nextcloud Wrapper v0.3.0 - WebDAV Direct Backend"""
+    """Nextcloud Wrapper v0.4.0 - rclone Engine & WebDAV Unified Backend"""
 
 # Aggiungi sotto-comandi (solo se importati con successo)
 if setup_app:
     app.add_typer(setup_app, name="setup")
 if user_app:
     app.add_typer(user_app, name="user")
+if mount_app:
+    app.add_typer(mount_app, name="mount")
 if webdav_app:
     app.add_typer(webdav_app, name="webdav")
 if quota_app:
@@ -148,14 +155,32 @@ def status():
     except Exception:
         rprint("[bold]Virtual Environment:[/bold] ⚠️ Non rilevato")
     
-    # Status mount WebDAV
+    # Status mount (aggiornato per engine unificato)
     try:
-        from .webdav import WebDAVMountManager
-        webdav_manager = WebDAVMountManager()
-        mounts = webdav_manager.list_webdav_mounts()
-        rprint(f"[bold]Mount WebDAV attivi:[/bold] {len(mounts)}")
+        from .mount import MountManager
+        mount_manager = MountManager()
+        mounts = mount_manager.list_mounts()
+        rprint(f"[bold]Mount attivi:[/bold] {len(mounts)}")
+        
+        # Breakdown per engine
+        from .mount import MountEngine
+        rclone_count = sum(1 for m in mounts if m["engine"] == MountEngine.RCLONE)
+        davfs2_count = sum(1 for m in mounts if m["engine"] == MountEngine.DAVFS2)
+        
+        if rclone_count > 0:
+            rprint(f"  • rclone: {rclone_count}")
+        if davfs2_count > 0:
+            rprint(f"  • davfs2: {davfs2_count}")
+            
     except Exception:
-        rprint("[bold]Mount WebDAV attivi:[/bold] ⚠️ Non rilevato")
+        try:
+            # Fallback al vecchio metodo WebDAV
+            from .webdav import WebDAVMountManager
+            webdav_manager = WebDAVMountManager()
+            mounts = webdav_manager.list_webdav_mounts()
+            rprint(f"[bold]Mount WebDAV attivi:[/bold] {len(mounts)}")
+        except Exception:
+            rprint("[bold]Mount attivi:[/bold] ⚠️ Non rilevato")
     
     # Status servizi
     try:

@@ -22,18 +22,22 @@ def user(
     password: str = typer.Argument(help="Password utente"),
     quota: str = typer.Option("100G", help="Quota Nextcloud (es. 100G, 50G)"),
     fs_percentage: float = typer.Option(0.02, "--fs-percentage", help="Percentuale filesystem (default: 2%)"),
+    engine: str = typer.Option("rclone", "--engine", help="Engine mount (rclone/davfs2)"),
+    profile: str = typer.Option("writes", "--profile", help="Profilo mount (solo rclone)"),
     subdomains: List[str] = typer.Option([], "--sub", help="Sottodomini da creare"),
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare login WebDAV"),
-    auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd automatico"),
-    # Rimossa opzione backup - gestito a livello superiore
+    auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd automatico")
 ):
     """
-    Setup completo utente con WebDAV diretto nella home directory
+    Setup completo utente con mount engine unificato (rclone/davfs2)
     
-    Crea: Utente Nextcloud + Linux + Mount WebDAV + Quote + Servizi
+    Crea: Utente Nextcloud + Linux + Mount + Quote + Servizi + Cartelle
     """
-    rprint(f"[bold blue]🚀 Nextcloud Wrapper v0.3.0 - Setup completo per: {username}[/bold blue]")
+    mount_engine = MountEngine(engine.lower())
+    
+    rprint(f"[bold blue]🚀 Nextcloud Wrapper v0.4.0 - Setup completo per: {username}[/bold blue]")
+    rprint(f"[cyan]Engine mount: {engine} | Profilo: {profile if mount_engine == MountEngine.RCLONE else 'default'}[/cyan]")
     
     try:
         # Verifica configurazione
@@ -46,15 +50,23 @@ def user(
             rprint("💡 Esegui: sudo nextcloud-wrapper setup user ...")
             sys.exit(1)
         
-        # 1. Setup WebDAV completo
-        rprint("[yellow]1️⃣ Setup WebDAV completo...[/yellow]")
-        if setup_webdav_user(username, password, quota, fs_percentage):
-            rprint("[green]✅ Setup WebDAV completato[/green]")
+        # 1. Setup completo con mount engine unificato
+        rprint("[yellow]1️⃣ Setup completo con mount engine...[/yellow]")
+        
+        if setup_user_with_mount(
+            username=username,
+            password=password, 
+            quota=quota,
+            fs_percentage=fs_percentage,
+            engine=mount_engine,
+            profile=profile if mount_engine == MountEngine.RCLONE else None
+        ):
+            rprint("[green]✅ Setup mount completato[/green]")
         else:
-            rprint("[red]❌ Errore setup WebDAV[/red]")
+            rprint("[red]❌ Errore setup mount[/red]")
             sys.exit(1)
         
-        # 2. Test login WebDAV
+        # 2. Test connettività WebDAV
         if not skip_test:
             rprint("[yellow]2️⃣ Test connettività WebDAV...[/yellow]")
             if test_webdav_connectivity(username, password):
@@ -80,22 +92,25 @@ def user(
         
         rprint(f"[cyan]📊 Cartelle configurate: {folder_count}[/cyan]")
         
-        # 4. Servizio systemd automatico
-        if auto_service:
-            rprint("[yellow]4️⃣ Configurazione mount automatico...[/yellow]")
-            try:
-                systemd_manager = SystemdManager()
-                service_name = systemd_manager.create_webdav_mount_service(username, password)
+        # 4. Informazioni mount engine utilizzato
+        rprint("[yellow]4️⃣ Verifica mount attivo...[/yellow]")
+        try:
+            from .mount import MountManager
+            mount_manager = MountManager()
+            home_path = f"/home/{username}"
+            status = mount_manager.get_mount_status(home_path)
+            
+            if status["mounted"]:
+                engine_used = status.get("engine")
+                rprint(f"[green]✅ Mount attivo: {engine_used.value if hasattr(engine_used, 'value') else engine_used}[/green]")
                 
-                if systemd_manager.enable_service(service_name):
-                    rprint(f"[green]✅ Servizio automatico: {service_name}[/green]")
-                else:
-                    rprint("[yellow]⚠️ Servizio creato ma non abilitato[/yellow]")
-                    
-            except Exception as e:
-                rprint(f"[yellow]⚠️ Avviso servizio systemd: {e}[/yellow]")
-        
-        # 5. (Backup rimosso - gestito esternamente)
+                if status.get("profile"):
+                    rprint(f"[cyan]📊 Profilo: {status['profile']}[/cyan]")
+            else:
+                rprint("[red]❌ Mount non attivo[/red]")
+                
+        except Exception as e:
+            rprint(f"[yellow]⚠️ Avviso verifica mount: {e}[/yellow]")
         
         # Riepilogo finale
         rprint(f"\n[bold green]🎉 Setup completato con successo per {username}![/bold green]")
@@ -103,7 +118,21 @@ def user(
         rprint("\n[bold]📋 Configurazione:[/bold]")
         rprint(f"• Utente Nextcloud: {username}")
         rprint(f"• Utente Linux: {username}")
-        rprint(f"• Home WebDAV: /home/{username}")
+        rprint(f"• Home directory: /home/{username}")
+        rprint(f"• Mount engine: {engine}")
+        
+        if mount_engine == MountEngine.RCLONE:
+            rprint(f"• Profilo rclone: {profile}")
+            
+            # Info profilo
+            from .mount import MountManager
+            mount_manager = MountManager()
+            profile_info = mount_manager.get_mount_profiles(mount_engine).get(profile)
+            if profile_info:
+                rprint(f"  - Tipo: {profile_info['description']}")
+                rprint(f"  - Storage: {profile_info['storage']}")
+                rprint(f"  - Performance: {profile_info['performance']}")
+        
         rprint(f"• URL WebDAV: {get_webdav_url(username)}")
         rprint(f"• Quota Nextcloud: {quota}")
         
@@ -123,12 +152,35 @@ def user(
         rprint(f"echo 'Hello World' > ~/test.txt  # File immediatamente su Nextcloud")
         rprint(f"ls ~/public/                     # Cartelle web del sito")
         
-        rprint("\n[bold]🛠️ Comandi utili:[/bold]")
-        rprint(f"nextcloud-wrapper user info {username}      # Info complete utente")
-        rprint(f"nextcloud-wrapper webdav status             # Status mount WebDAV")
-        rprint(f"nextcloud-wrapper quota show {username}     # Verifica quota")
-        rprint(f"nextcloud-wrapper service list              # Status servizi")
+        if mount_engine == MountEngine.RCLONE:
+            rprint("\n[bold]🚀 Vantaggi rclone:[/bold]")
+            rprint(f"• Performance superiori per lettura/scrittura")
+            rprint(f"• Cache VFS intelligente ({profile} profile)")
+            rprint(f"• Gestione avanzata connessioni di rete")
+            rprint(f"• Supporto streaming per file grandi")
         
+        rprint("\n[bold]🛠️ Comandi utili:[/bold]")
+        rprint(f"nextcloud-wrapper mount status               # Status mount engine")
+        rprint(f"nextcloud-wrapper mount info /home/{username} # Info dettagliate mount")
+        rprint(f"nextcloud-wrapper user info {username}       # Info complete utente")
+        rprint(f"nextcloud-wrapper quota show {username}      # Verifica quota")
+        rprint(f"nextcloud-wrapper service list               # Status servizi")
+        
+        # Suggerimenti ottimizzazione
+        if mount_engine == MountEngine.RCLONE:
+            rprint("\n[bold]💡 Suggerimenti ottimizzazione:[/bold]")
+            rprint(f"• Profilo 'writes': ottimale per editing file")
+            rprint(f"• Profilo 'minimal': per hosting web leggero")
+            rprint(f"• Profilo 'hosting': per massima compatibilità web server")
+            rprint(f"nextcloud-wrapper mount profiles rclone     # Vedi tutti i profili")
+        
+    except ValueError as ve:
+        if "engine" in str(ve).lower():
+            rprint(f"[red]❌ Engine non supportato: {engine}[/red]")
+            rprint("💡 Engine supportati: rclone, davfs2")
+        else:
+            rprint(f"[red]❌ Errore validazione: {ve}[/red]")
+        sys.exit(1)
     except Exception as e:
         rprint(f"[bold red]💥 Errore durante setup: {str(e)}[/bold red]")
         sys.exit(1)
