@@ -100,13 +100,13 @@ class WebDAVMountManager:
                 shutil.copy2(davfs_conf, backup_path)
                 print(f"📦 Backup configurazione: {backup_path}")
             
-            # Configurazione ottimizzata per Nextcloud con 10GB cache
+            # Configurazione ottimizzata per Nextcloud - CACHE LOCALE INTELLIGENTE
             config_content = f"""# Configurazione davfs2 per Nextcloud
-# Generata da nextcloud-wrapper v0.3.0
-# Configurazione ottimizzata per prestazioni elevate
-# Cache: 10GB, Indicizzazione: 16k file
+# Generata da nextcloud-wrapper v0.3.0 
+# MODALITÀ CACHE-FIRST OFFLINE-FIRST
+# I file scaricati restano disponibili localmente senza chiamate WebDAV
 
-# Cache settings (10GB cache per prestazioni elevate)
+# Cache settings (10GB cache persistente locale)
 cache_size {self.config['cache_size']}
 table_size {self.config['table_size']}
 
@@ -122,9 +122,9 @@ max_retry 300
 cache_dir {self.cache_dir}
 backup_dir lost+found
 
-# Lock settings
-use_locks {1 if self.config['use_locks'] else 0}
-lock_timeout 1800
+# Lock settings (disabilitati per velocità locale)
+use_locks 0
+lock_timeout 30
 
 # SSL/TLS Certificate handling
 # Per server con certificati self-signed o problemi SSL
@@ -142,20 +142,25 @@ n_cookies 0
 precheck 1
 use_compression 1
 
-# Upload settings
-delay_upload 10
-max_upload_attempts 15
+# Upload settings (ottimizzati per cache locale)
+delay_upload 5
+max_upload_attempts 10
 
-# Directory and file refresh (ottimizzato per cache grande)
-dir_refresh 300
-file_refresh 5
+# CONFIGURAZIONE CACHE-FIRST - File locali prioritari
+# Refresh molto lunghi per evitare chiamate WebDAV continue
+dir_refresh 86400
+file_refresh 43200
 
-# Buffer size ottimizzato (KiB)
+# Buffer size ottimizzato per operazioni locali
 buf_size {self.config['buf_size']}
 
-# Ottimizzazioni aggiuntive per cache grande
-# Mantieni metadati in cache più a lungo
-min_propset 30
+# Comportamento offline-first
+# Non verificare server se file è in cache locale
+if_modified_since 0
+# Usa sempre la versione locale se disponibile
+fore_stale 1
+# Mantieni metadati in cache molto a lungo
+min_propset 300
 
 # End of configuration
 """

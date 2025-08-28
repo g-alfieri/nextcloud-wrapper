@@ -3,6 +3,9 @@ CLI WebDAV - Gestione mount WebDAV
 """
 import typer
 import sys
+import os
+import time
+import shutil
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -450,6 +453,163 @@ def webdav_disk_usage(
         
     except Exception as e:
         rprint(f"[red]💥 Errore uso disco: {str(e)}[/red]")
+        sys.exit(1)
+
+
+@webdav_app.command("enable-offline")
+def enable_offline_mode():
+    """Abilita modalità cache-first offline-first per massima velocità locale"""
+    rprint("[blue]🏠 Abilitazione modalità Cache-First Offline-First[/blue]")
+    rprint("File già scaricati saranno disponibili localmente senza WebDAV")
+    
+    if not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti[/red]")
+        sys.exit(1)
+    
+    try:
+        # Configurazione cache-first estrema
+        import os
+        os.environ["NC_WEBDAV_CACHE_SIZE"] = "10240"   # 10GB cache
+        os.environ["NC_WEBDAV_TABLE_SIZE"] = "32768"   # 32k file indicizzati
+        os.environ["NC_WEBDAV_BUF_SIZE"] = "128"       # Buffer 128KiB
+        
+        webdav_manager = WebDAVMountManager()
+        
+        # Backup configurazione corrente
+        config_file = Path("/etc/davfs2/davfs2.conf")
+        backup_path = None
+        if config_file.exists():
+            backup_path = f"{config_file}.backup-offline.{int(time.time())}"
+            shutil.copy2(config_file, backup_path)
+            rprint(f"[yellow]📋 Backup: {backup_path}[/yellow]")
+        
+        # Configurazione offline-first massima
+        offline_config = """# Configurazione davfs2 per Nextcloud - OFFLINE-FIRST ESTREMA
+# Generata da nextcloud-wrapper v0.3.0
+# Comportamento: File locali prioritari, WebDAV solo per file mancanti
+
+# Cache settings (massima cache locale)
+cache_size 10240
+table_size 32768
+
+# Timeouts molto corti (fallback veloce su locale)
+connect_timeout 5
+read_timeout 15
+
+# Retry minimi (preferire locale)
+retry 1
+max_retry 3
+
+# Cache directory
+cache_dir /var/cache/davfs2
+backup_dir lost+found
+
+# Lock completamente disabilitati per massima velocità
+use_locks 0
+lock_timeout 10
+
+# Authentication
+ask_auth 0
+
+# HTTP optimizations
+use_expect100 0
+if_match_bug 1
+drop_weak_etags 1
+n_cookies 0
+precheck 1
+use_compression 1
+
+# Upload veloce per modifiche locali
+delay_upload 1
+max_upload_attempts 5
+
+# MODALITÀ OFFLINE-FIRST ESTREMA
+# Refresh quasi mai (24 ore directory, 12 ore file)
+dir_refresh 86400
+file_refresh 43200
+
+# Buffer grande per operazioni locali
+buf_size 256
+
+# Comportamento locale-first assoluto
+# Mai verificare server se file esiste localmente
+if_modified_since 0
+# Usa SEMPRE la versione locale
+fore_stale 1
+# Cache metadati per ore
+min_propset 3600
+
+# End of offline-first configuration
+"""
+        
+        # Scrivi configurazione offline
+        with open(config_file, 'w') as f:
+            f.write(offline_config)
+        
+        rprint("[green]✅ Modalità Offline-First abilitata[/green]")
+        
+        # Tabella benefici
+        benefits_table = Table(title="Benefici Modalità Offline-First")
+        benefits_table.add_column("Operazione", style="cyan")
+        benefits_table.add_column("Comportamento", style="white")
+        benefits_table.add_column("Velocità", style="green")
+        
+        benefits_table.add_row(
+            "ls -l (file già visti)",
+            "Lettura solo cache locale",
+            "⚡ Istantaneo"
+        )
+        benefits_table.add_row(
+            "cat file.txt",
+            "Diretto da /var/cache/davfs2",
+            "⚡ Locale"
+        )
+        benefits_table.add_row(
+            "cd directory",
+            "Metadati da cache (24h)",
+            "⚡ Veloce"
+        )
+        benefits_table.add_row(
+            "File NON in cache",
+            "Download automatico una volta",
+            "🌐 WebDAV"
+        )
+        benefits_table.add_row(
+            "Modifiche file",
+            "Locale + sync automatico",
+            "⚡+🌐 Ibrido"
+        )
+        
+        console.print(benefits_table)
+        
+        rprint("\n[bold blue]🏠 Come funziona la modalità Offline-First:[/bold blue]")
+        rprint("• File già aperti/visti: lettura istantanea da cache locale")
+        rprint("• File nuovi: download automatico al primo accesso")
+        rprint("• Directory già visitate: listing istantaneo per 24 ore")
+        rprint("• Modifiche: salvate localmente + sync automatico server")
+        rprint("• Disconnessioni: lavori normalmente sui file in cache")
+        
+        rprint("\n[bold green]🚀 Ora 'ls -l' sui file già visti è istantaneo![/bold green]")
+        
+        # Warning importanti
+        rprint("\n[bold yellow]⚠️ Importante:[/bold yellow]")
+        rprint("• File modificati contemporaneamente da più dispositivi: possibili conflitti")
+        rprint("• Cache 10GB: monitora spazio disco disponibile")
+        rprint("• Per disabilitare: nextcloud-wrapper webdav reconfigure (default)")
+        
+        # Applica ai mount esistenti
+        active_mounts = webdav_manager.list_webdav_mounts()
+        if active_mounts:
+            rprint("\n[yellow]💡 Per applicare ai mount esistenti (consigliato):[/yellow]")
+            for mount in active_mounts[:3]:
+                mount_point = mount.get("mountpoint", "")
+                if mount_point:
+                    username = os.path.basename(mount_point)
+                    rprint(f"  nextcloud-wrapper webdav unmount {mount_point}")
+                    rprint(f"  nextcloud-wrapper webdav mount {username} <password>")
+        
+    except Exception as e:
+        rprint(f"[red]💥 Errore abilitazione offline-first: {str(e)}[/red]")
         sys.exit(1)
 
 
