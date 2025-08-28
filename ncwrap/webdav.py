@@ -21,7 +21,8 @@ class WebDAVMountManager:
     def _load_config(self) -> Dict:
         """Carica configurazione da variabili ambiente"""
         return {
-            "cache_size": int(os.environ.get("NC_WEBDAV_CACHE_SIZE", "256")),
+            "cache_size": int(os.environ.get("NC_WEBDAV_CACHE_SIZE", "10240")),  # 10GB cache
+            "table_size": int(os.environ.get("NC_WEBDAV_TABLE_SIZE", "16384")),  # 16k file indicizzati
             "connect_timeout": int(os.environ.get("NC_WEBDAV_CONNECT_TIMEOUT", "30")),
             "read_timeout": int(os.environ.get("NC_WEBDAV_READ_TIMEOUT", "60")),
             "retry_count": int(os.environ.get("NC_WEBDAV_RETRY_COUNT", "3")),
@@ -29,6 +30,7 @@ class WebDAVMountManager:
             "file_mode": os.environ.get("NC_WEBDAV_FILE_MODE", "644"),
             "dir_mode": os.environ.get("NC_WEBDAV_DIR_MODE", "755"),
             "umask": os.environ.get("NC_WEBDAV_UMASK", "022"),
+            "buf_size": int(os.environ.get("NC_WEBDAV_BUF_SIZE", "64")),  # Buffer aumentato a 64KiB
         }
     
     def install_davfs2(self) -> bool:
@@ -98,14 +100,15 @@ class WebDAVMountManager:
                 shutil.copy2(davfs_conf, backup_path)
                 print(f"📦 Backup configurazione: {backup_path}")
             
-            # Configurazione ottimizzata per Nextcloud
+            # Configurazione ottimizzata per Nextcloud con 10GB cache
             config_content = f"""# Configurazione davfs2 per Nextcloud
 # Generata da nextcloud-wrapper v0.3.0
-# Compatibile con davfs2 Fedora
+# Configurazione ottimizzata per prestazioni elevate
+# Cache: 10GB, Indicizzazione: 16k file
 
-# Cache settings
+# Cache settings (10GB cache per prestazioni elevate)
 cache_size {self.config['cache_size']}
-table_size 1024
+table_size {self.config['table_size']}
 
 # Timeouts (seconds)
 connect_timeout {self.config['connect_timeout']}
@@ -143,12 +146,18 @@ use_compression 1
 delay_upload 10
 max_upload_attempts 15
 
-# Directory and file refresh
-dir_refresh 60
-file_refresh 1
+# Directory and file refresh (ottimizzato per cache grande)
+dir_refresh 300
+file_refresh 5
 
-# Buffer size (KiB)
-buf_size 16
+# Buffer size ottimizzato (KiB)
+buf_size {self.config['buf_size']}
+
+# Ottimizzazioni aggiuntive per cache grande
+# Mantieni metadati in cache più a lungo
+min_propset 30
+# Aumenta la soglia per sync automatico
+sync_interval 60
 
 # End of configuration
 """

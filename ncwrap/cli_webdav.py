@@ -3,6 +3,7 @@ CLI WebDAV - Gestione mount WebDAV
 """
 import typer
 import sys
+from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
@@ -449,6 +450,288 @@ def webdav_disk_usage(
         
     except Exception as e:
         rprint(f"[red]💥 Errore uso disco: {str(e)}[/red]")
+        sys.exit(1)
+
+
+@webdav_app.command("cache")
+def show_cache_info():
+    """Mostra informazioni e stato della cache davfs2"""
+    rprint("[blue]🖼️ Cache davfs2[/blue]")
+    
+    try:
+        from pathlib import Path
+        import os
+        
+        # Directory cache
+        cache_dir = Path("/var/cache/davfs2")
+        config_file = Path("/etc/davfs2/davfs2.conf")
+        
+        # Tabella informazioni configurazione
+        config_table = Table(title="Configurazione Cache davfs2")
+        config_table.add_column("Parametro", style="cyan")
+        config_table.add_column("Valore Configurato", style="white")
+        config_table.add_column("Descrizione", style="yellow")
+        
+        # Leggi configurazione se esiste
+        cache_size = "Non trovato"
+        table_size = "Non trovato"
+        buf_size = "Non trovato"
+        
+        if config_file.exists():
+            try:
+                with open(config_file, 'r') as f:
+                    config_content = f.read()
+                
+                import re
+                # Estrai valori configurazione
+                cache_match = re.search(r'^cache_size\s+(\d+)', config_content, re.MULTILINE)
+                if cache_match:
+                    cache_mb = int(cache_match.group(1))
+                    cache_size = f"{cache_mb} MB ({cache_mb/1024:.1f} GB)"
+                
+                table_match = re.search(r'^table_size\s+(\d+)', config_content, re.MULTILINE)
+                if table_match:
+                    table_size = f"{table_match.group(1)} file"
+                
+                buf_match = re.search(r'^buf_size\s+(\d+)', config_content, re.MULTILINE)
+                if buf_match:
+                    buf_size = f"{buf_match.group(1)} KiB"
+                    
+            except Exception as e:
+                rprint(f"[yellow]⚠️ Errore lettura config: {e}[/yellow]")
+        
+        config_table.add_row(
+            "cache_size",
+            cache_size,
+            "Dimensione cache disco"
+        )
+        config_table.add_row(
+            "table_size",
+            table_size,
+            "N. max file indicizzati"
+        )
+        config_table.add_row(
+            "buf_size",
+            buf_size,
+            "Buffer I/O"
+        )
+        
+        console.print(config_table)
+        
+        # Informazioni cache directory
+        rprint("\n[blue]📋 Stato Cache Directory:[/blue]")
+        
+        if cache_dir.exists():
+            # Calcola dimensione cache attuale
+            total_size = 0
+            file_count = 0
+            
+            try:
+                for root, dirs, files in os.walk(cache_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        try:
+                            file_size = os.path.getsize(file_path)
+                            total_size += file_size
+                            file_count += 1
+                        except:
+                            continue
+            except Exception as e:
+                rprint(f"[red]❌ Errore calcolo dimensioni: {e}[/red]")
+                return
+            
+            # Informazioni spazio
+            try:
+                stat = os.statvfs(str(cache_dir))
+                available_space = stat.f_bavail * stat.f_frsize
+            except:
+                available_space = 0
+            
+            cache_table = Table(title="Stato Cache Attuale")
+            cache_table.add_column("Metrica", style="cyan")
+            cache_table.add_column("Valore", style="white")
+            cache_table.add_column("Status", style="green")
+            
+            cache_table.add_row(
+                "Directory cache",
+                str(cache_dir),
+                "🟢 Esistente"
+            )
+            
+            cache_table.add_row(
+                "Spazio utilizzato",
+                bytes_to_human(total_size),
+                "📊 Attuale"
+            )
+            
+            cache_table.add_row(
+                "File in cache",
+                str(file_count),
+                "📁 Conteggio"
+            )
+            
+            cache_table.add_row(
+                "Spazio disponibile",
+                bytes_to_human(available_space),
+                "💾 Filesystem"
+            )
+            
+            # Calcola percentuale uso se conosciamo la config
+            if cache_size != "Non trovato" and "MB" in cache_size:
+                try:
+                    configured_mb = int(re.search(r'(\d+)', cache_size).group(1))
+                    configured_bytes = configured_mb * 1024 * 1024
+                    usage_percent = (total_size / configured_bytes) * 100
+                    
+                    cache_table.add_row(
+                        "Uso cache (%)",
+                        f"{usage_percent:.1f}%",
+                        "📈 Percentuale"
+                    )
+                except:
+                    pass
+            
+            console.print(cache_table)
+            
+            # Avvisi e raccomandazioni
+            if total_size > 5 * 1024 * 1024 * 1024:  # > 5GB
+                rprint("\n[bold yellow]📊 Cache grande rilevata:[/bold yellow]")
+                rprint(f"• La cache è {bytes_to_human(total_size)}")
+                rprint(f"• Considera pulizia se le prestazioni sono lente")
+                rprint(f"• Usa: nextcloud-wrapper webdav cleanup")
+            
+            if file_count > 10000:
+                rprint("\n[bold cyan]🗄 Molti file in cache:[/bold cyan]")
+                rprint(f"• {file_count:,} file indicizzati")
+                rprint(f"• Prestazioni ottimali con cache grande")
+            
+        else:
+            rprint(f"[red]❌ Directory cache non trovata: {cache_dir}[/red]")
+            rprint("💡 Esegui: nextcloud-wrapper webdav install")
+        
+        # Suggerimenti ottimizzazione
+        rprint("\n[bold blue]🚀 Suggerimenti ottimizzazione:[/bold blue]")
+        rprint("• Cache 10GB ottima per uso intensivo")
+        rprint("• 16k file indicizzati per prestazioni elevate")
+        rprint("• Monitora spazio disco disponibile")
+        rprint("• Pulizia periodica se cache cresce troppo")
+        
+    except Exception as e:
+        rprint(f"[red]💥 Errore info cache: {str(e)}[/red]")
+        sys.exit(1)
+
+
+@webdav_app.command("reconfigure")
+def reconfigure_davfs2(
+    cache_gb: int = typer.Option(10, "--cache-gb", help="Dimensione cache in GB"),
+    table_size: int = typer.Option(16384, "--table-size", help="Numero max file indicizzati"),
+    buf_size: int = typer.Option(64, "--buf-size", help="Buffer I/O in KiB")
+):
+    """Riconfigura davfs2 con nuovi parametri ottimizzati"""
+    rprint(f"[blue]⚙️ Riconfigurazione davfs2[/blue]")
+    rprint(f"Cache: {cache_gb}GB, File indicizzati: {table_size:,}, Buffer: {buf_size}KiB")
+    
+    if not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti[/red]")
+        sys.exit(1)
+    
+    try:
+        # Aggiorna variabili ambiente temporanee per questa configurazione
+        import os
+        os.environ["NC_WEBDAV_CACHE_SIZE"] = str(cache_gb * 1024)  # Converti GB in MB
+        os.environ["NC_WEBDAV_TABLE_SIZE"] = str(table_size)
+        os.environ["NC_WEBDAV_BUF_SIZE"] = str(buf_size)
+        
+        webdav_manager = WebDAVMountManager()
+        
+        # Mostra configurazione attuale prima della modifica
+        config_file = Path("/etc/davfs2/davfs2.conf")
+        if config_file.exists():
+            rprint("[yellow]📋 Configurazione attuale:[/yellow]")
+            try:
+                with open(config_file, 'r') as f:
+                    config_content = f.read()
+                
+                import re
+                current_cache = re.search(r'^cache_size\s+(\d+)', config_content, re.MULTILINE)
+                current_table = re.search(r'^table_size\s+(\d+)', config_content, re.MULTILINE)
+                current_buf = re.search(r'^buf_size\s+(\d+)', config_content, re.MULTILINE)
+                
+                if current_cache:
+                    current_cache_gb = int(current_cache.group(1)) / 1024
+                    rprint(f"• Cache attuale: {current_cache_gb:.1f}GB")
+                if current_table:
+                    rprint(f"• File indicizzati attuali: {current_table.group(1)}")
+                if current_buf:
+                    rprint(f"• Buffer attuale: {current_buf.group(1)}KiB")
+                    
+            except Exception as e:
+                rprint(f"[yellow]⚠️ Errore lettura config attuale: {e}[/yellow]")
+        
+        # Verifica mount attivi prima della riconfigurazione
+        active_mounts = webdav_manager.list_webdav_mounts()
+        if active_mounts:
+            rprint(f"[yellow]⚠️ {len(active_mounts)} mount WebDAV attivi rilevati[/yellow]")
+            rprint("Questa operazione potrebbe richiedere il restart dei mount")
+            
+            from rich.prompt import Confirm
+            if not Confirm.ask("Continuare con la riconfigurazione?"):
+                rprint("[cyan]Operazione annullata[/cyan]")
+                return
+        
+        # Applica nuova configurazione
+        if webdav_manager.configure_davfs2():
+            rprint(f"[green]✅ Configurazione davfs2 aggiornata[/green]")
+            
+            # Mostra nuova configurazione
+            rprint(f"[bold green]🆕 Nuova configurazione:[/bold green]")
+            rprint(f"• Cache: {cache_gb}GB ({cache_gb * 1024}MB)")
+            rprint(f"• File indicizzati: {table_size:,}")
+            rprint(f"• Buffer I/O: {buf_size}KiB")
+            
+            # Suggerimenti post-configurazione
+            rprint(f"\n[bold blue]💡 Suggerimenti:[/bold blue]")
+            
+            if active_mounts:
+                rprint("• Considera restart mount per applicare modifiche:")
+                for mount in active_mounts:
+                    mount_point = mount.get("mountpoint", "")
+                    if mount_point:
+                        # Estrai username dal mount point (assuming /home/username pattern)
+                        import os
+                        username = os.path.basename(mount_point)
+                        rprint(f"  - nextcloud-wrapper webdav unmount {mount_point}")
+                        rprint(f"  - nextcloud-wrapper webdav mount {username} <password>")
+            
+            rprint("• Monitora cache con: nextcloud-wrapper webdav cache")
+            rprint("• Pulizia cache: nextcloud-wrapper webdav cleanup")
+            rprint(f"• Cache ottimizzata per {table_size:,} file")
+            
+            # Verifica spazio disco necessario
+            try:
+                cache_dir = Path("/var/cache/davfs2")
+                if cache_dir.exists():
+                    import os
+                    stat = os.statvfs(str(cache_dir))
+                    available_gb = (stat.f_bavail * stat.f_frsize) / (1024**3)
+                    
+                    if available_gb < cache_gb:
+                        rprint(f"\n[bold yellow]⚠️ Avviso spazio disco:[/bold yellow]")
+                        rprint(f"• Spazio disponibile: {available_gb:.1f}GB")
+                        rprint(f"• Cache configurata: {cache_gb}GB")
+                        rprint(f"• Potrebbe non esserci abbastanza spazio")
+                    else:
+                        rprint(f"\n[green]✅ Spazio disco sufficiente: {available_gb:.1f}GB disponibili[/green]")
+                        
+            except Exception:
+                rprint(f"\n[yellow]⚠️ Impossibile verificare spazio disco[/yellow]")
+            
+        else:
+            rprint("[red]❌ Errore aggiornamento configurazione[/red]")
+            sys.exit(1)
+            
+    except Exception as e:
+        rprint(f"[red]💥 Errore riconfigurazione: {str(e)}[/red]")
         sys.exit(1)
 
 
