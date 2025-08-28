@@ -5,6 +5,7 @@ Supporta sia rclone (predefinito) che davfs2 (fallback)
 import os
 import shutil
 import time
+
 from pathlib import Path
 from typing import Optional, Dict, List
 from enum import Enum
@@ -121,8 +122,8 @@ class MountManager:
         return False
     
     def mount_user_home(self, username: str, password: str, home_path: str = None, 
-                       engine: MountEngine = None, profile: str = None,
-                       auto_fallback: bool = None) -> Dict:
+                       engine: MountEngine = None, profile: str = "full",
+                       auto_fallback: bool = None, remount: bool = False) -> Dict:
         """
         Monta WebDAV nella home directory con engine specificato
         
@@ -152,20 +153,25 @@ class MountManager:
         # Verifica se già montato
         if is_mounted(home_path):
             print(f"✅ {home_path} già montato")
-            result.update({
-                "success": True,
-                "engine_used": self._detect_mount_engine(home_path),
-                "message": "Already mounted"
-            })
-            return result
+            if remount:
+                print(f"🔗 Richiesto remount per {username} con --remount")
+                if self.unmount_user_home(home_path):
+                    print(f"✅ {home_path} smontato")
+            else:
+                result.update({
+                    "success": True,
+                    "engine_used": self._detect_mount_engine(home_path),
+                    "message": "Already mounted"
+                })
+                return result
         
         # Tentativo con engine preferito
         mount_success = False
         
         if engine == MountEngine.RCLONE:
-            mount_success = self._mount_with_rclone(username, password, home_path, profile or "writes")
+            mount_success = self._mount_with_rclone(username, password, home_path, profile)
             result["engine_used"] = MountEngine.RCLONE
-            result["profile"] = profile or "writes"
+            result["profile"] = profile or "full"
             
         elif engine == MountEngine.DAVFS2:
             mount_success = self._mount_with_davfs2(username, password, home_path)
@@ -201,7 +207,7 @@ class MountManager:
         
         return result
     
-    def _mount_with_rclone(self, username: str, password: str, home_path: str, profile: str) -> bool:
+    def _mount_with_rclone(self, username: str, password: str, home_path: str, profile: str = "full") -> bool:
         """Mount con rclone"""
         try:
             # Setup remote se non esiste
@@ -212,9 +218,16 @@ class MountManager:
             
             # Backup home esistente
             backup_path = self._backup_existing_home(home_path, username)
-            
+            uid, gid = get_user_uid_gid(username)
+            user_permissions = [
+                "--uid", str(uid),
+                "--gid", str(gid), 
+                "--umask", "0022",
+                "--file-perms", "0644",
+                "--dir-perms", "0755"
+            ]
             # Mount con rclone - Configurazione più robusta
-            if mount_remote(remote_name, home_path, background=True, profile=profile):
+            if mount_remote(remote_name, home_path, background=True, profile=profile, custom_options=user_permissions):
                 # Verifica che il mount sia effettivamente attivo
                 import time
                 time.sleep(3)  # Attendi che rclone si stabilizzi
@@ -313,7 +326,7 @@ class MountManager:
                 return False
     
     def create_systemd_service(self, username: str, password: str, home_path: str = None,
-                              engine: MountEngine = None, profile: str = None) -> str:
+                              engine: MountEngine = None, profile: str = "full") -> str:
         """Crea servizio systemd per mount automatico"""
         if not engine:
             engine = self.preferred_engine
@@ -468,7 +481,7 @@ class MountManager:
 
 def setup_user_with_mount(username: str, password: str, quota: str = None,
                          fs_percentage: float = 0.02, engine: MountEngine = None,
-                         profile: str = None) -> bool:
+                         profile: str = "full", remount: bool = False) -> bool:
     """
     Setup completo utente con mount engine unificato
     
@@ -526,8 +539,14 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
     # 5. Mount con engine unificato
     home_path = f"/home/{username}"
     mount_result = mount_manager.mount_user_home(
-        username, password, home_path, target_engine, profile
+        username=username,
+        password=password, 
+        home_path=home_path,
+        engine=target_engine,      # Usa parametro nominale
+        profile=profile,
+        remount=remount            # Mancava auto_fallback
     )
+
     
     if not mount_result["success"]:
         print(f"❌ {mount_result['message']}")

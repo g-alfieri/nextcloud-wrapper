@@ -23,11 +23,12 @@ def user(
     quota: str = typer.Option("100G", help="Quota Nextcloud (es. 100G, 50G)"),
     fs_percentage: float = typer.Option(0.02, "--fs-percentage", help="Percentuale filesystem (default: 2%)"),
     engine: str = typer.Option("rclone", "--engine", help="Engine mount (rclone/davfs2)"),
-    profile: str = typer.Option("writes", "--profile", help="Profilo mount (solo rclone)"),
+    profile: str = typer.Option("full", "--profile", help="Profilo mount (solo rclone)"),
     subdomains: List[str] = typer.Option([], "--sub", help="Sottodomini da creare"),
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare login WebDAV"),
-    auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd automatico")
+    auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd automatico"),
+    remount: bool = typer.Option(False, "--remount", help="Smonta e rimonta per aggiornare configurazioni")
 ):
     """
     Setup completo utente con mount engine unificato (rclone/davfs2)
@@ -59,7 +60,8 @@ def user(
             quota=quota,
             fs_percentage=fs_percentage,
             engine=mount_engine,
-            profile=profile if mount_engine == MountEngine.RCLONE else None
+            profile=profile if mount_engine == MountEngine.RCLONE else None,
+            remount=remount
         ):
             rprint("[green]✅ Setup mount completato[/green]")
         else:
@@ -169,6 +171,7 @@ def user(
         # Suggerimenti ottimizzazione
         if mount_engine == MountEngine.RCLONE:
             rprint("\n[bold]💡 Suggerimenti ottimizzazione:[/bold]")
+            rprint(f"• Profilo 'full': proxy cache per ottimizzazione spazio disco")
             rprint(f"• Profilo 'writes': ottimale per editing file")
             rprint(f"• Profilo 'minimal': per hosting web leggero")
             rprint(f"• Profilo 'hosting': per massima compatibilità web server")

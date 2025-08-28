@@ -485,3 +485,31 @@ def find_and_load_env() -> bool:
             return True
     
     return False
+
+def merge_cli_options(*option_lists):
+    """Merge corretto per opzioni CLI con flag-valore"""
+    options_dict = {}
+    
+    for options in option_lists:
+        i = 0
+        while i < len(options):
+            if options[i].startswith("--"):
+                flag = options[i]
+                # Ha un valore?
+                if i + 1 < len(options) and not options[i + 1].startswith("--"):
+                    options_dict[flag] = options[i + 1]
+                    i += 2
+                else:
+                    options_dict[flag] = None  # Flag booleano
+                    i += 1
+            else:
+                i += 1
+    
+    # Ricostruisci lista preservando associazioni
+    result = []
+    for flag, value in options_dict.items():
+        result.append(flag)
+        if value is not None:
+            result.append(value)
+    
+    return result
