@@ -148,17 +148,12 @@ max_upload_attempts 10
 
 # CONFIGURAZIONE CACHE-FIRST - File locali prioritari
 # Refresh molto lunghi per evitare chiamate WebDAV continue
-dir_refresh 86400
-file_refresh 43200
+dir_refresh 60
+file_refresh 10
 
 # Buffer size ottimizzato per operazioni locali
 buf_size {self.config['buf_size']}
 
-# Comportamento offline-first
-# Non verificare server se file è in cache locale
-if_modified_since 0
-# Usa sempre la versione locale se disponibile
-fore_stale 1
 # Mantieni metadati in cache molto a lungo
 min_propset 300
 
