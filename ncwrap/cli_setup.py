@@ -8,7 +8,7 @@ from rich.console import Console
 from rich import print as rprint
 
 from .api import get_nc_config, test_webdav_connectivity, create_folder_structure, get_webdav_url
-from .webdav import setup_webdav_user
+from .mount import setup_user_with_mount, MountEngine
 from .systemd import SystemdManager
 from .utils import check_sudo_privileges, parse_size_to_bytes, bytes_to_human
 
