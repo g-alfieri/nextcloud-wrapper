@@ -213,19 +213,43 @@ class MountManager:
             # Backup home esistente
             backup_path = self._backup_existing_home(home_path, username)
             
-            # Mount con rclone
+            # Mount con rclone - Configurazione più robusta
             if mount_remote(remote_name, home_path, background=True, profile=profile):
+                # Verifica che il mount sia effettivamente attivo
+                import time
+                time.sleep(3)  # Attendi che rclone si stabilizzi
+                
+                if not is_mounted(home_path):
+                    print(f"❌ Mount non attivo dopo setup per {home_path}")
+                    return False
+                
+                # Test basic I/O prima di continuare
+                test_file = os.path.join(home_path, ".mount-test")
+                try:
+                    with open(test_file, 'w') as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    print(f"✅ Test I/O mount riuscito")
+                except Exception as e:
+                    print(f"❌ Test I/O mount fallito: {e}")
+                    return False
+                
                 # Impostazioni permessi post-mount
                 uid, gid = get_user_uid_gid(username)
                 run(["chown", f"{uid}:{gid}", home_path], check=False)
                 
-                # Ripristina file importanti
+                # Ripristina file importanti solo se I/O funziona
                 if backup_path:
-                    self._restore_important_files(backup_path, home_path, username)
+                    try:
+                        self._restore_important_files(backup_path, home_path, username)
+                    except Exception as e:
+                        print(f"⚠️ Avviso ripristino file: {e}")
+                        # Non è critico, continua
                 
                 return True
-            
-            return False
+            else:
+                print(f"❌ Comando mount rclone fallito")
+                return False
             
         except Exception as e:
             print(f"❌ Errore mount rclone: {e}")

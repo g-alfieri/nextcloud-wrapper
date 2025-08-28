@@ -95,15 +95,52 @@ def add_nextcloud_remote(name: str, base_url: str, username: str, password: str)
     webdav_url = f"{base_url.rstrip('/')}/remote.php/dav/files/{username}/"
     
     try:
-        run([
+        # Verifica connettività prima di creare il remote
+        print(f"🔍 Test connettività: {webdav_url}")
+        
+        # Test con curl prima
+        import subprocess
+        curl_test = subprocess.run([
+            "curl", "-s", "-u", f"{username}:{password}", 
+            "-X", "PROPFIND", webdav_url
+        ], capture_output=True, text=True)
+        
+        if curl_test.returncode != 0:
+            print(f"❌ Test connettività curl fallito: {curl_test.stderr}")
+            return False
+        
+        print(f"✅ Connettività WebDAV verificata")
+        
+        # Crea il remote rclone
+        cmd = [
             "rclone", "config", "create", name, "webdav",
             f"url={webdav_url}",
             f"user={username}",
             f"pass={password}",
             "vendor=nextcloud",
             "--config", str(RCLONE_CONF)
-        ])
-        return True
+        ]
+        
+        print(f"Comando rclone: {' '.join(cmd[:7])}...")  # Non mostrare password
+        run(cmd)
+        
+        # Test il remote appena creato
+        test_cmd = [
+            "rclone", "lsd", f"{name}:/", 
+            "--config", str(RCLONE_CONF),
+            "--timeout", "30s"
+        ]
+        
+        try:
+            run(test_cmd)
+            print(f"✅ Remote {name} creato e testato con successo")
+            return True
+        except RuntimeError as test_error:
+            print(f"❌ Test remote fallito: {test_error}")
+            # Rimuovi il remote fallito
+            run(["rclone", "config", "delete", name, "--config", str(RCLONE_CONF)], check=False)
+            return False
+            
     except RuntimeError as e:
         print(f"Errore creazione remote {name}: {e}")
         return False

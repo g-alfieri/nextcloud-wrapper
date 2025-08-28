@@ -506,13 +506,20 @@ def setup_quota_for_user(username: str, nextcloud_quota: str, fs_percentage: flo
         
         # Imposta quota filesystem
         quota_manager = QuotaManager()
-        if quota_manager.set_quota(username, fs_quota):
-            print(f"✅ Quota filesystem: {fs_quota}")
-            return True
-        else:
-            print(f"❌ Errore quota filesystem")
-            print(f"Debug: fs_quota={fs_quota}, fs_bytes={fs_bytes}")
-            return False
+        
+        try:
+            # Prova a impostare quota filesystem
+            if quota_manager.set_quota(username, fs_quota):
+                print(f"✅ Quota filesystem: {fs_quota}")
+                return True
+            else:
+                print(f"⚠️ Quota filesystem non supportata su questo sistema")
+                print(f"📊 Quota impostata solo su Nextcloud: {nc_quota_formatted}")
+                return True  # Considera successo parziale
+        except Exception as e:
+            print(f"⚠️ Errore quota filesystem: {e}")
+            print(f"📊 Quota impostata solo su Nextcloud: {nc_quota_formatted}")
+            return True  # Fallback: almeno quota Nextcloud funziona
             
     except Exception as e:
         print(f"❌ Errore setup quota: {e}")

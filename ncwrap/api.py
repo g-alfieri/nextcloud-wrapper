@@ -444,20 +444,41 @@ def create_folder_structure(user: str, password: str, root_domain: str, subdomai
     
     results = {}
     
-    # Cartelle principali
-    main_folders = ["public", "logs", "backup"]
-    for folder in main_folders:
-        status = create_webdav_folder(folder, user, password)
-        results[folder] = status
+    # Lista tutte le cartelle da creare
+    folders_to_create = [
+        "public",
+        "logs", 
+        "backup",
+        f"public/{root_domain}"
+    ]
     
-    # Cartella dominio principale in /public
-    main_domain_path = f"public/{root_domain}"
-    results[main_domain_path] = create_webdav_folder(main_domain_path, user, password)
-    
-    # Cartelle sottodomini in /public  
+    # Aggiungi sottodomini
     for subdomain in subdomains:
-        subdomain_path = f"public/{subdomain}"
-        results[subdomain_path] = create_webdav_folder(subdomain_path, user, password)
+        folders_to_create.append(f"public/{subdomain}")
+    
+    # Delay per rate limiting
+    import time
+    DELAY_BETWEEN_REQUESTS = 2  # 2 secondi tra richieste
+    
+    for folder in folders_to_create:
+        try:
+            # Delay per evitare rate limiting
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+            
+            status = create_webdav_folder(folder, user, password)
+            results[folder] = status
+            
+            if status == 429:  # Rate limited
+                print(f"⚠️ Rate limiting per {folder}, attesa più lunga...")
+                time.sleep(10)  # Attesa più lunga
+                
+                # Riprova una volta
+                status = create_webdav_folder(folder, user, password)
+                results[folder] = status
+                
+        except Exception as e:
+            print(f"❌ Errore creazione cartella {folder}: {e}")
+            results[folder] = 500
     
     return results
 
