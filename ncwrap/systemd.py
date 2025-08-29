@@ -76,7 +76,7 @@ class SystemdManager:
         else:
             raise RuntimeError(f"Errore creazione file servizio: {service_file}")
     
-    # create_backup_service rimosso - backup gestito esternamente
+
     
     def create_sync_service(self, username: str, source: str, dest: str,
                            schedule: str = "hourly", user: bool = False) -> str:
@@ -359,7 +359,7 @@ Restart=no
 WantedBy=multi-user.target
 """
     
-    # _generate_backup_service_config rimosso - backup gestito esternamente
+
     
     def _generate_sync_service_config(self, source: str, dest: str, username: str) -> str:
         """Genera configurazione servizio sync"""

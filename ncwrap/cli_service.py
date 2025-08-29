@@ -312,34 +312,7 @@ def create_webdav_service(
         rprint(f"[red]❌ Errore creazione servizio: {e}[/red]")
 
 
-@service_app.command("backup")
-def create_backup_service(
-    username: str = typer.Argument(help="Nome utente"),
-    interval: str = typer.Option("daily", help="Intervallo backup (hourly, daily, weekly)"),
-    enable: bool = typer.Option(True, "--enable/--no-enable", help="Abilita automaticamente")
-):
-    """Crea servizio backup automatico per utente"""
-    rprint(f"[blue]🗄️ Creando servizio backup per {username}[/blue]")
-    
-    if not check_sudo_privileges():
-        rprint("[red]❌ Privilegi sudo richiesti[/red]")
-        sys.exit(1)
-    
-    try:
-        systemd_manager = SystemdManager()
-        service_name = systemd_manager.create_backup_service(username, interval)
-        
-        rprint(f"[green]✅ Servizio backup creato: {service_name}[/green]")
-        rprint(f"[cyan]Intervallo: {interval}[/cyan]")
-        
-        if enable:
-            if systemd_manager.enable_service(service_name):
-                rprint(f"[green]✅ Timer backup abilitato[/green]")
-            else:
-                rprint(f"[yellow]⚠️ Servizio backup creato ma timer non abilitato[/yellow]")
-                
-    except Exception as e:
-        rprint(f"[red]❌ Errore creazione servizio backup: {e}[/red]")
+
 
 
 @service_app.command("reload")
