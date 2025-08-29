@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nextcloud-wrapper"
-version = "0.3.0"
-description = "Wrapper Python per gestire Nextcloud con WebDAV diretto, quote e gestione utenti"
+version = "1.0.0rc2"
+description = "Wrapper Python per gestire Nextcloud con rclone engine semplificato (v1.0)"
 authors = [{name="Your Name", email="you@example.com"}]
 dependencies = [
     "typer[all]>=0.9.0",

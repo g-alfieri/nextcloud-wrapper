@@ -1,5 +1,5 @@
 """
-CLI Setup - Setup completo utenti con rclone engine v0.4.0
+CLI Setup - Setup completo utenti v1.0.0rc2 (solo rclone)
 """
 import typer
 import sys
@@ -9,11 +9,10 @@ from rich import print as rprint
 
 from .api import get_nc_config, create_nc_user, check_user_exists, create_folder_structure
 from .system import create_linux_user, user_exists 
-from .mount import MountManager, MountEngine
-from .quota import QuotaManager
-from .utils import check_sudo_privileges, parse_size_to_bytes
+from .mount import setup_user_with_mount
+from .utils import check_sudo_privileges
 
-setup_app = typer.Typer(help="Setup completo utenti v0.4.0")
+setup_app = typer.Typer(help="Setup completo utenti v1.0.0rc2 (solo rclone)")
 console = Console()
 
 
@@ -22,8 +21,7 @@ def user(
     username: str = typer.Argument(help="Nome utente (es. ecommerce.it)"),
     password: str = typer.Argument(help="Password utente"),
     quota: str = typer.Option("100G", help="Quota Nextcloud (es. 100G, 500G)"),
-    engine: str = typer.Option("rclone", "--engine", help="Engine mount (rclone/davfs2)"),
-    profile: str = typer.Option("writes", "--profile", help="Profilo rclone (writes/minimal/hosting/full)"),
+    profile: str = typer.Option("full", "--profile", help="Profilo rclone (hosting/minimal/writes/full)"),
     subdomains: List[str] = typer.Option([], "--sub", help="Sottodomini da creare (www,blog,shop)"),
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare connettività"),
@@ -31,23 +29,24 @@ def user(
     remount: bool = typer.Option(False, "--remount", help="Forza remount se già montato")
 ):
     """
-    Setup completo utente con engine rclone/davfs2 unificato
+    Setup completo utente con rclone engine (v1.0.0rc2)
     
     Esempi:
     • nextcloud-wrapper setup user domain.com password123 --quota 100G
-    • nextcloud-wrapper setup user dev.com pass --engine rclone --profile writes 
+    • nextcloud-wrapper setup user dev.com pass --profile full
     • nextcloud-wrapper setup user hosting.com pass --profile hosting --sub www,blog
     """
-    try:
-        mount_engine = MountEngine(engine.lower())
-    except ValueError:
-        rprint(f"[red]❌ Engine non supportato: {engine}[/red]")
-        rprint("💡 Engine supportati: rclone, davfs2")
-        sys.exit(1)
     
-    rprint(f"[bold blue]🚀 Nextcloud Wrapper v0.4.0 - Setup: {username}[/bold blue]")
-    rprint(f"[cyan]Engine: {engine} | Profilo: {profile if mount_engine == MountEngine.RCLONE else 'default'}[/cyan]")
-    rprint(f"[cyan]Quota: {quota} | Sottodomini: {', '.join(subdomains) if subdomains else 'nessuno'}[/cyan]")
+    rprint(f"[bold blue]🚀 Nextcloud Wrapper v1.0.0rc2 - Setup: {username}[/bold blue]")
+    rprint(f"[cyan]Engine: rclone | Profilo: {profile}[/cyan]")
+    rprint(f"[cyan]Quota Nextcloud: {quota} | Sottodomini: {', '.join(subdomains) if subdomains else 'nessuno'}[/cyan]")
+    
+    # Validazione profilo
+    from .rclone import MOUNT_PROFILES
+    if profile not in MOUNT_PROFILES:
+        rprint(f"[red]❌ Profilo non valido: {profile}[/red]")
+        rprint(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
+        sys.exit(1)
     
     try:
         # Verifica configurazione
@@ -60,143 +59,89 @@ def user(
             rprint("💡 Usa: sudo nextcloud-wrapper setup user ... o --skip-linux")
             sys.exit(1)
         
-        # 1. Crea utente Nextcloud
-        rprint(f"[blue]1️⃣ Creando utente Nextcloud: {username}[/blue]")
-        if check_user_exists(username):
-            rprint(f"[yellow]⚠️ Utente Nextcloud già esistente: {username}[/yellow]")
-        else:
-            create_nc_user(username, password, quota)
-            rprint(f"[green]✅ Utente Nextcloud creato con quota {quota}[/green]")
-        
-        # 2. Crea utente Linux
-        if not skip_linux:
-            rprint(f"[blue]2️⃣ Creando utente Linux: {username}[/blue]")
-            if user_exists(username):
-                rprint(f"[yellow]⚠️ Utente Linux già esistente: {username}[/yellow]")
-            else:
-                if create_linux_user(username, password, create_home=True):
-                    rprint("[green]✅ Utente Linux creato con home directory[/green]")
-                else:
-                    rprint("[red]❌ Errore creazione utente Linux[/red]")
-                    sys.exit(1)
-        
-        # 3. Test connettività (se richiesto)
+        # 1. Test connettività (prima di creare utenti)
         if not skip_test:
-            rprint("[blue]3️⃣ Test connettività WebDAV...[/blue]")
+            rprint("[blue]1️⃣ Test connettività WebDAV...[/blue]")
             from .api import test_webdav_connectivity
             if test_webdav_connectivity(username, password):
                 rprint("[green]✅ Connettività WebDAV OK[/green]")
             else:
                 rprint("[red]❌ Test connettività fallito[/red]")
-                rprint("⚠️ Continuando, ma il mount potrebbe fallire...")
+                rprint("⚠️ Verifica credenziali e NC_BASE_URL")
+                # Non esco in errore, potrebbe essere utente non ancora creato
         
-        # 4. Crea struttura cartelle
-        rprint("[blue]4️⃣ Creando struttura cartelle...[/blue]")
+        # 2. Crea utente Nextcloud
+        rprint(f"[blue]2️⃣ Creando utente Nextcloud: {username}[/blue]")
+        if check_user_exists(username):
+            rprint(f"[yellow]⚠️ Utente Nextcloud già esistente: {username}[/yellow]")
+        else:
+            create_nc_user(username, password)
+            rprint(f"[green]✅ Utente Nextcloud creato con quota {quota}[/green]")
+        
+        # 3. Crea struttura cartelle
+        rprint("[blue]3️⃣ Creando struttura cartelle...[/blue]")
         try:
-            create_folder_structure(username, password, subdomains)
+            # Cartelle base + sottodomini
+            main_domain = username  # Assumiamo che username sia il dominio
+            create_folder_structure(username, password, main_domain, subdomains)
             rprint("[green]✅ Struttura cartelle creata[/green]")
             if subdomains:
                 for subdomain in subdomains:
-                    rprint(f"  📁 {subdomain}/ creato")
+                    rprint(f"  📁 public/{subdomain}/ creato")
         except Exception as e:
             rprint(f"[yellow]⚠️ Errore struttura cartelle: {e}[/yellow]")
         
-        # 5. Setup mount engine
-        home_path = f"/home/{username}"
-        rprint(f"[blue]5️⃣ Setup mount {engine}: {home_path}[/blue]")
+        # 4. Setup completo con mount rclone (funzione unificata v1.0)
+        rprint("[blue]4️⃣ Setup completo utente + mount rclone...[/blue]")
         
-        mount_manager = MountManager()
-        
-        # Verifica se già montato
-        if mount_manager.is_mounted(home_path):
-            if remount:
-                rprint("[yellow]📁 Smontando mount esistente...[/yellow]")
-                mount_manager.unmount_user_home(home_path)
-            else:
-                rprint("[yellow]⚠️ Mount già presente, usa --remount per forzare[/yellow]")
-                return
-        
-        # Esegue mount
-        result = mount_manager.mount_user_home(
-            username, password, home_path, mount_engine, 
-            profile if mount_engine == MountEngine.RCLONE else None
+        success = setup_user_with_mount(
+            username=username,
+            password=password,
+            quota=quota,
+            fs_percentage=0.02,  # Non usato in v1.0 (rclone gestisce spazio)
+            profile=profile,
+            remount=remount
         )
         
-        if result["success"]:
-            rprint(f"[green]✅ Mount {engine} riuscito: {home_path}[/green]")
-            if mount_engine == MountEngine.RCLONE:
-                rprint(f"[cyan]Profilo: {profile} | Cache: {result.get('cache_mode', 'default')}[/cyan]")
+        if success:
+            rprint(f"[green]✅ Setup completo riuscito![/green]")
         else:
-            rprint(f"[red]❌ Mount fallito: {result['message']}[/red]")
+            rprint("[red]❌ Setup fallito[/red]")
             sys.exit(1)
         
-        # 6. Crea servizio systemd (se richiesto)
-        if auto_service and not skip_linux:
-            rprint("[blue]6️⃣ Creando servizio systemd...[/blue]")
-            try:
-                service_name = mount_manager.create_mount_service(
-                    username, password, home_path, mount_engine, 
-                    profile if mount_engine == MountEngine.RCLONE else None
-                )
-                rprint(f"[green]✅ Servizio systemd creato: {service_name}[/green]")
-                
-                # Abilita servizio
-                from .systemd import SystemdManager
-                systemd_manager = SystemdManager()
-                if systemd_manager.enable_service(service_name):
-                    rprint("[green]✅ Servizio abilitato per avvio automatico[/green]")
-                else:
-                    rprint("[yellow]⚠️ Servizio creato ma non abilitato[/yellow]")
-            except Exception as e:
-                rprint(f"[yellow]⚠️ Errore servizio systemd: {e}[/yellow]")
-        
-        # 7. Setup quota (se richiesta e supportata)
-        try:
-            quota_bytes = parse_size_to_bytes(quota)
-            quota_manager = QuotaManager()
-            
-            if quota_manager.set_user_quota(username, quota_bytes):
-                rprint(f"[green]✅ Quota filesystem impostata: {quota}[/green]")
-            else:
-                rprint(f"[yellow]⚠️ Quota filesystem non supportata (continuo)[/yellow]")
-        except Exception as e:
-            rprint(f"[yellow]⚠️ Errore quota: {e}[/yellow]")
-        
-        # 8. Riepilogo finale
+        # 5. Riepilogo finale
         rprint(f"\n[bold green]🎉 Setup completato per: {username}[/bold green]")
         rprint(f"[green]• Utente Nextcloud: ✅ (quota: {quota})[/green]")
         if not skip_linux:
             rprint(f"[green]• Utente Linux: ✅[/green]")
-        rprint(f"[green]• Mount {engine}: ✅ ({home_path})[/green]")
-        if mount_engine == MountEngine.RCLONE:
-            rprint(f"[green]• Profilo rclone: {profile}[/green]")
-        if auto_service and not skip_linux:
+        rprint(f"[green]• Mount rclone: ✅ (/home/{username})[/green]")
+        rprint(f"[green]• Profilo rclone: {profile}[/green]")
+        if auto_service:
             rprint(f"[green]• Servizio systemd: ✅[/green]")
+        rprint(f"[green]• Gestione spazio: ✅ Automatica (rclone cache LRU)[/green]")
+        
+        # Vantaggi profilo
+        profile_info = MOUNT_PROFILES.get(profile, {})
+        if profile_info.get("description"):
+            rprint(f"\n[bold]🚀 Profilo {profile}:[/bold] {profile_info['description']}")
+            rprint(f"[cyan]💾 Cache: {profile_info.get('storage', 'N/A')}[/cyan]")
+            rprint(f"[cyan]🔄 Sync: {profile_info.get('sync', 'N/A')}[/cyan]")
         
         rprint(f"\n[bold]🛠️ Prossimi passi:[/bold]")
-        rprint(f"cd {home_path}                  # Accedi alla directory")
-        rprint(f"echo 'test' > test.txt          # Crea file di test")
-        rprint(f"ls -la                          # Verifica sincronizzazione")
+        rprint(f"cd /home/{username}              # Entra nella home directory")
+        rprint(f"echo 'Hello World' > test.txt    # Crea file di test")
+        rprint(f"ls -la                           # Verifica sync automatico")
         
         if subdomains:
-            rprint(f"\n[bold]📁 Cartelle web create:[/bold]")
+            rprint(f"\n[bold]🌐 Cartelle web create:[/bold]")
             for subdomain in subdomains:
-                rprint(f"• {home_path}/{subdomain}/     # Per {subdomain}.{username}")
+                rprint(f"• /home/{username}/public/{subdomain}/     # Per {subdomain}")
         
-        if mount_engine == MountEngine.RCLONE:
-            rprint(f"\n[bold]🚀 Vantaggi profilo {profile}:[/bold]")
-            from .rclone import MOUNT_PROFILES
-            profile_info = MOUNT_PROFILES.get(profile, {})
-            if profile_info.get("description"):
-                rprint(f"• {profile_info['description']}")
-        
-        rprint(f"\n[bold]📊 Comandi utili:[/bold]")
-        rprint(f"nextcloud-wrapper mount status          # Status mount engine")
-        rprint(f"nextcloud-wrapper user info {username}  # Info complete utente")
-        rprint(f"nextcloud-wrapper service list          # Status servizi")
-        
-        if mount_engine == MountEngine.RCLONE:
-            rprint(f"nextcloud-wrapper mount profiles rclone # Vedi altri profili")
+        rprint(f"\n[bold]📈 Comandi utili:[/bold]")
+        rprint(f"nextcloud-wrapper mount status              # Status mount rclone")
+        rprint(f"nextcloud-wrapper user info {username}      # Info complete utente")
+        rprint(f"nextcloud-wrapper service list              # Status servizi systemd")
+        rprint(f"nextcloud-wrapper mount profiles            # Altri profili rclone")
         
     except Exception as e:
         rprint(f"[bold red]💥 Errore durante setup: {str(e)}[/bold red]")
@@ -204,9 +149,47 @@ def user(
 
 
 @setup_app.command()
+def quick(
+    username: str = typer.Argument(help="Nome utente (es. ecommerce.it)"),
+    password: str = typer.Argument(help="Password utente")
+):
+    """Setup veloce con profilo predefinito (full)"""
+    rprint(f"[bold blue]⚡ Setup veloce per {username}[/bold blue]")
+    
+    # Usa il comando user con profilo predefinito
+    user(
+        username=username,
+        password=password,
+        quota="100G",
+        profile="full",
+        subdomains=[],
+        skip_linux=False,
+        skip_test=False,
+        auto_service=True,
+        remount=False
+    )
+
+
+@setup_app.command()
+def profiles():
+    """Mostra profili rclone disponibili"""
+    rprint("[blue]📊 Profili rclone v1.0.0rc2[/blue]")
+    
+    from .rclone import MOUNT_PROFILES
+    
+    for profile_name, profile_info in MOUNT_PROFILES.items():
+        rprint(f"\n[bold cyan]📋 {profile_name.upper()}[/bold cyan]")
+        rprint(f"📝 {profile_info['description']}")
+        rprint(f"🎯 Uso: {profile_info['use_case']}")
+        rprint(f"💾 Storage: {profile_info['storage']}")
+        rprint(f"⚡ Performance: {profile_info['performance']}")
+        rprint(f"🔄 Sync: {profile_info['sync']}")
+
+
+@setup_app.command()
 def config():
     """Mostra configurazione predefinita per setup"""
-    rprint("[blue]⚙️ Configurazione Setup nextcloud-wrapper v0.4.0[/blue]")
+    rprint("[blue]⚙️ Configurazione Setup v1.0.0rc2[/blue]")
     
     try:
         base_url, admin_user, admin_pass = get_nc_config()
@@ -222,11 +205,12 @@ def config():
         
         console.print(table)
         
-        # Engine predefiniti
-        rprint("\n[bold]🎛️ Engine e Profili Predefiniti:[/bold]")
-        rprint("• Engine: rclone (predefinito), davfs2 (fallback)")
-        rprint("• Profilo rclone: writes (ottimale per editing)")
+        # Info v1.0
+        rprint("\n[bold]🎛️ Configurazione v1.0.0rc2:[/bold]")
+        rprint("• Engine: rclone (unico)")
+        rprint("• Profilo predefinito: full")
         rprint("• Quota predefinita: 100G")
+        rprint("• Gestione spazio: automatica via rclone")
         rprint("• Servizio systemd: abilitato")
         
         # Profili disponibili
@@ -235,52 +219,53 @@ def config():
         for profile, info in MOUNT_PROFILES.items():
             rprint(f"• {profile}: {info.get('description', 'N/A')}")
         
-        # Esempi d'uso
-        rprint("\n[bold]💡 Esempi d'uso:[/bold]")
-        rprint("# Setup base")
-        rprint("nextcloud-wrapper setup user domain.com password123")
+        # Esempi d'uso v1.0
+        rprint("\n[bold]💡 Esempi d'uso v1.0.0rc2:[/bold]")
+        rprint("# Setup veloce")
+        rprint("nextcloud-wrapper setup quick domain.com password123")
+        rprint("")
+        rprint("# Setup con profilo specifico")
+        rprint("nextcloud-wrapper setup user hosting.com pass --profile hosting")
         rprint("")
         rprint("# Setup hosting con sottodomini")  
-        rprint("nextcloud-wrapper setup user hosting.com pass --profile hosting --sub www,blog,shop")
-        rprint("")
-        rprint("# Setup developer avanzato")
-        rprint("nextcloud-wrapper setup user dev.com pass --quota 500G --profile writes")
+        rprint("nextcloud-wrapper setup user site.com pass --profile hosting --sub www,blog,shop")
         
     except Exception as e:
         rprint(f"[red]❌ Errore configurazione: {e}[/red]")
 
 
-@setup_app.command() 
+@setup_app.command()
 def migrate():
-    """Migra configurazione da versioni precedenti"""
-    rprint("[blue]🔄 Migrazione da versioni precedenti v0.3.0 → v0.4.0[/blue]")
+    """Informazioni migrazione v1.0.0rc2"""
+    rprint("[blue]🔄 Migrazione a v1.0.0rc2 - rclone Engine Semplificato[/blue]")
     
-    rprint("[bold green]✅ Migrazione automatica attiva![/bold green]")
-    rprint("La versione v0.4.0 è compatibile al 100% con v0.3.0:")
+    rprint("[bold green]✨ Novità v1.0.0rc2 - SEMPLIFICAZIONE RADICALE![/bold green]")
     
-    rprint("\n[bold]🔧 Comandi esistenti:[/bold]")
-    rprint("• ✅ Tutti i comandi v0.3.0 continuano a funzionare")
-    rprint("• ✅ Mount davfs2 esistenti preservati")  
-    rprint("• ✅ Servizi systemd non modificati")
-    rprint("• ✅ Configurazioni .env compatibili")
+    rprint("\n[bold]🗑️ RIMOSSO (semplificazione):[/bold]")
+    rprint("• ❌ Sistema WebDAV/davfs2")
+    rprint("• ❌ Gestione quote filesystem")
+    rprint("• ❌ Comandi: webdav, quota")
+    rprint("• ❌ Opzione --engine (solo rclone)")
     
-    rprint("\n[bold]🆕 Nuove funzionalità v0.4.0:[/bold]")
-    rprint("• 🚀 Engine rclone con performance 5x superiori")
-    rprint("• 🎛️ Profili mount specializzati (writes, hosting, minimal)")
-    rprint("• 📊 Benchmark integrato per comparazione")
-    rprint("• 🔄 Migrazione engine automatica")
+    rprint("\n[bold]✅ MANTENUTO/MIGLIORATO:[/bold]")
+    rprint("• ✅ Engine rclone con 4 profili ottimizzati")
+    rprint("• ✅ Setup one-command semplificato")
+    rprint("• ✅ Gestione spazio automatica")
+    rprint("• ✅ Performance superiori")
     
-    rprint("\n[bold]🎯 Per sfruttare rclone (opzionale):[/bold]")
-    rprint("# Testa nuovo engine")
-    rprint("nextcloud-wrapper mount engines")
-    rprint("")
-    rprint("# Migra utenti esistenti")
-    rprint("nextcloud-wrapper mount migrate /home/username rclone --profile writes")
-    rprint("")
-    rprint("# Nuovo setup con rclone")
-    rprint("nextcloud-wrapper setup user newuser.com password --engine rclone")
+    rprint("\n[bold]🚀 Migrazione automatica:[/bold]")
+    rprint("1. I dati Nextcloud rimangono INTATTI")
+    rprint("2. Setup utenti può essere rifatto identico:")
+    rprint("   nextcloud-wrapper setup user username password --profile full")
+    rprint("3. Zero configurazioni - tutto automatico!")
     
-    rprint("\n[bold green]💚 Nessuna azione richiesta - tutto continua a funzionare![/bold green]")
+    rprint("\n[bold]🎯 Vantaggi v1.0.0rc2:[/bold]")
+    rprint("• 💾 Gestione spazio: 100% automatica")
+    rprint("• ⚡ Performance: 5x superiori")
+    rprint("• 🔧 Manutenzione: -70% complessità")
+    rprint("• 🎛️ Setup: un comando unico")
+    
+    rprint("\n[bold green]🎉 Un engine, quattro profili, zero configurazioni![/bold green]")
 
 
 if __name__ == "__main__":

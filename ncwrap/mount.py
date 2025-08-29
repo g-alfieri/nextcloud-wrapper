@@ -482,37 +482,33 @@ class MountManager:
 
 
 def setup_user_with_mount(username: str, password: str, quota: str = None,
-                         fs_percentage: float = 0.02, engine: MountEngine = None,
                          profile: str = "full", remount: bool = False) -> bool:
     """
-    Setup completo utente con mount engine unificato
+    Setup completo utente con rclone engine (v1.0.0rc2)
     
     Args:
         username: Nome utente
         password: Password
-        quota: Quota Nextcloud (es. "100G")
-        fs_percentage: Percentuale filesystem per quota BTRFS
-        engine: Engine mount (default: rclone)
-        profile: Profilo mount (solo per rclone)
+        quota: Quota Nextcloud (es. "100G") - solo info
+        profile: Profilo rclone mount
+        remount: Forza remount se già esistente
     
     Returns:
         True se setup completato
     """
-    print(f"🚀 Setup completo per {username} (engine: {engine or 'auto'})")
+    print(f"🚀 Setup completo per {username} (v1.0.0rc2 - rclone)")
     
-    mount_manager = MountManager(engine or MountEngine.RCLONE)
+    mount_manager = MountManager(MountEngine.RCLONE)
     
-    # 1. Rileva e installa engine necessario
+    # 1. Verifica e installa rclone
     available_engines = mount_manager.detect_available_engines()
-    target_engine = engine or mount_manager.get_recommended_engine()
-    
-    if not available_engines[target_engine]:
-        print(f"📦 Installando {target_engine.value}...")
-        if not mount_manager.install_engine(target_engine):
+    if not available_engines[MountEngine.RCLONE]:
+        print(f"📦 Installando rclone...")
+        if not mount_manager.install_engine(MountEngine.RCLONE):
             return False
     
-    # 2. Configura engine
-    if not mount_manager.configure_engine(target_engine):
+    # 2. Configura rclone
+    if not mount_manager.configure_engine(MountEngine.RCLONE):
         return False
     
     # 3. Crea utente Nextcloud se non esiste
@@ -538,15 +534,15 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
     else:
         print(f"ℹ️ Utente Linux già esistente: {username}")
     
-    # 5. Mount con engine unificato
+    # 5. Mount con rclone (v1.0)
     home_path = f"/home/{username}"
     mount_result = mount_manager.mount_user_home(
         username=username,
         password=password, 
         home_path=home_path,
-        engine=target_engine,      # Usa parametro nominale
+        engine=MountEngine.RCLONE,
         profile=profile,
-        remount=remount            # Mancava auto_fallback
+        remount=remount
     )
 
     

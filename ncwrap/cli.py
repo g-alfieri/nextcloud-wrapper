@@ -1,5 +1,5 @@
 """
-CLI principale per nextcloud-wrapper v0.3.0 - WebDAV Direct Backend
+CLI principale per nextcloud-wrapper v1.0.0rc2 - rclone Engine Semplificato
 """
 import typer
 import sys
@@ -24,10 +24,8 @@ try:
 except ImportError:
     mount_app = None
 
-try:
-    from .cli_quota import quota_app
-except ImportError:
-    quota_app = None
+# quota_app rimosso in v1.0.0 (gestione spazio automatica rclone)
+quota_app = None
 
 try:
     from .cli_service import service_app
@@ -47,12 +45,12 @@ def version_callback(value: bool):
     if value:
         from . import __version__
         rprint(f"[bold blue]Nextcloud Wrapper v{__version__}[/bold blue]")
-        rprint("[cyan]Backend: WebDAV Direct Mount[/cyan]")
+        rprint("[cyan]Engine: rclone Semplificato (v1.0)[/cyan]")
         raise typer.Exit()
 
 app = typer.Typer(
     name="nextcloud-wrapper",
-    help="Wrapper v0.3.0 per gestione Nextcloud con WebDAV diretto, quote e utenti",
+    help="Wrapper v1.0.0rc2 per gestione Nextcloud con rclone engine semplificato",
     add_completion=False
 )
 console = Console()
@@ -67,7 +65,7 @@ def main(
         is_eager=True
     )
 ):
-    """Nextcloud Wrapper v0.4.0 - rclone Engine & WebDAV Unified Backend"""
+    """Nextcloud Wrapper v1.0.0rc2 - rclone Engine Semplificato"""
 
 # Aggiungi sotto-comandi (solo se importati con successo)
 if setup_app:
@@ -77,8 +75,7 @@ if user_app:
 if mount_app:
     app.add_typer(mount_app, name="mount")
 
-if quota_app:
-    app.add_typer(quota_app, name="quota")
+# quota command rimosso in v1.0.0
 if service_app:
     app.add_typer(service_app, name="service")
 if venv_app:
@@ -88,7 +85,7 @@ if venv_app:
 @app.command()
 def config():
     """Mostra configurazione corrente"""
-    rprint("[blue]⚙️ Configurazione Nextcloud Wrapper v0.3.0[/blue]")
+    rprint("[blue]⚙️ Configurazione Nextcloud Wrapper v1.0.0rc2[/blue]")
     
     try:
         base_url, admin_user, admin_pass = get_nc_config()
@@ -108,15 +105,8 @@ def config():
         has_sudo = check_sudo_privileges()
         rprint(f"[bold]Privilegi sudo:[/bold] {'✅ Disponibili' if has_sudo else '❌ Non disponibili'}")
         
-        # Info filesystem
-        try:
-            from .quota import QuotaManager
-            quota_manager = QuotaManager()
-            fs_info = quota_manager.get_filesystem_usage()
-            if fs_info:
-                rprint(f"[bold]Filesystem:[/bold] {fs_info['filesystem']} ({fs_info['use_percent']} usato)")
-        except Exception:
-            rprint("[bold]Filesystem:[/bold] ⚠️ Info non disponibile")
+        # Gestione spazio v1.0 (automatica rclone)
+        rprint("[bold]Gestione spazio:[/bold] ✅ Automatica via rclone (cache LRU)")
         
     except Exception as e:
         rprint(f"[red]❌ Errore configurazione: {e}[/red]")
@@ -127,7 +117,7 @@ def version():
     """Mostra versione"""
     from . import __version__
     rprint(f"[bold blue]Nextcloud Wrapper v{__version__}[/bold blue]")
-    rprint("[cyan]Backend: WebDAV Direct Mount[/cyan]")
+    rprint("[cyan]Engine: rclone Semplificato (v1.0)[/cyan]")
 
 
 @app.command()
@@ -151,32 +141,32 @@ def status():
     except Exception:
         rprint("[bold]Virtual Environment:[/bold] ⚠️ Non rilevato")
     
-    # Status mount (aggiornato per engine unificato)
+    # Status mount rclone (engine unico v1.0)
     try:
         from .mount import MountManager
         mount_manager = MountManager()
         mounts = mount_manager.list_mounts()
-        rprint(f"[bold]Mount attivi:[/bold] {len(mounts)}")
+        rprint(f"[bold]Mount rclone attivi:[/bold] {len(mounts)}")
         
-        # Breakdown per engine
-        from .mount import MountEngine
-        rclone_count = sum(1 for m in mounts if m["engine"] == MountEngine.RCLONE)
-        davfs2_count = sum(1 for m in mounts if m["engine"] == MountEngine.DAVFS2)
+        # Info profili se disponibili
+        profiles_used = set()
+        for mount in mounts:
+            if mount.get("type") == "rclone":
+                # Tenta di rilevare il profilo (approssimativo)
+                if "full" in str(mount.get("options", "")):
+                    profiles_used.add("full")
+                elif "writes" in str(mount.get("options", "")):
+                    profiles_used.add("writes")
+                elif "minimal" in str(mount.get("options", "")):
+                    profiles_used.add("minimal")
+                elif "hosting" in str(mount.get("options", "")):
+                    profiles_used.add("hosting")
         
-        if rclone_count > 0:
-            rprint(f"  • rclone: {rclone_count}")
-        if davfs2_count > 0:
-            rprint(f"  • davfs2: {davfs2_count}")
+        if profiles_used:
+            rprint(f"  • Profili in uso: {', '.join(profiles_used)}")
             
     except Exception:
-        try:
-            # Fallback al vecchio metodo WebDAV
-            from .webdav import WebDAVMountManager
-            webdav_manager = WebDAVMountManager()
-            mounts = webdav_manager.list_webdav_mounts()
-            rprint(f"[bold]Mount WebDAV attivi:[/bold] {len(mounts)}")
-        except Exception:
-            rprint("[bold]Mount attivi:[/bold] ⚠️ Non rilevato")
+        rprint("[bold]Mount rclone:[/bold] ⚠️ Non rilevato")
     
     # Status servizi
     try:
@@ -188,13 +178,8 @@ def status():
     except Exception:
         rprint("[bold]Servizi systemd:[/bold] ⚠️ Non rilevato")
     
-    # Status quote
-    try:
-        from .quota import list_all_user_quotas
-        quotas = list_all_user_quotas()
-        rprint(f"[bold]Quote configurate:[/bold] {len(quotas)}")
-    except Exception:
-        rprint("[bold]Quote configurate:[/bold] ⚠️ Non rilevato")
+    # Gestione spazio v1.0 (automatica)
+    rprint("[bold]Gestione spazio:[/bold] ✅ Automatica via rclone (cache LRU)")
 
 
 if __name__ == "__main__":

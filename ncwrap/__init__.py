@@ -1,6 +1,6 @@
 """
-Nextcloud Wrapper v0.4.0 - rclone Engine & Unified Backend
+Nextcloud Wrapper v1.0.0rc2 - rclone Engine Semplificato
 """
 
-__version__ = "0.4.0"
-__description__ = "Wrapper Python per gestire Nextcloud con engine mount unificato (rclone/davfs2), quote e gestione utenti"
+__version__ = "1.0.0rc2"
+__description__ = "Wrapper Python per gestire Nextcloud con rclone engine semplificato (v1.0)"
