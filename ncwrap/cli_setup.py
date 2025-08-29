@@ -98,7 +98,6 @@ def user(
             username=username,
             password=password,
             quota=quota,
-            fs_percentage=0.02,  # Non usato in v1.0 (rclone gestisce spazio)
             profile=profile,
             remount=remount
         )

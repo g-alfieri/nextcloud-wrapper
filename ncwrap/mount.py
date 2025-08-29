@@ -1,6 +1,6 @@
 """
-Modulo unificato per gestione mount Nextcloud
-Supporta sia rclone (predefinito) che davfs2 (fallback)
+Modulo unificato per gestione mount Nextcloud v1.0.0rc2
+Solo rclone engine semplificato
 """
 import os
 import shutil
@@ -16,48 +16,38 @@ from .rclone import (
     add_nextcloud_remote, mount_remote, unmount, is_mounted as rclone_is_mounted,
     create_systemd_mount_service, get_mount_profile_info, MOUNT_PROFILES
 )
-from .webdav import WebDAVMountManager
 
 
 class MountEngine(str, Enum):
     """Engine di mount supportati"""
     RCLONE = "rclone"
-    DAVFS2 = "davfs2"
 
 
 class MountManager:
     """
-    Gestore unificato mount Nextcloud con supporto rclone + davfs2
-    
-    - Default: rclone (performance migliori)
-    - Fallback: davfs2 (compatibilità)
+    Gestore mount Nextcloud v1.0.0rc2 - solo rclone
     """
     
     def __init__(self, preferred_engine: MountEngine = MountEngine.RCLONE):
-        self.preferred_engine = preferred_engine
-        self.webdav_manager = WebDAVMountManager()
+        self.preferred_engine = MountEngine.RCLONE  # Fisso v1.0
         
         # Configurazione engine
         self.config = {
-            "rclone_default_profile": "writes",
+            "rclone_default_profile": "full",
             "rclone_cache_dir": Path.home() / ".cache" / "rclone" / "ncwrap",
-            "auto_fallback": True,
             "service_prefix": "ncwrap"
         }
     
     def detect_available_engines(self) -> Dict[MountEngine, bool]:
         """Rileva quali engine sono disponibili nel sistema"""
         return {
-            MountEngine.RCLONE: is_command_available("rclone"),
-            MountEngine.DAVFS2: is_command_available("mount.davfs")
+            MountEngine.RCLONE: is_command_available("rclone")
         }
     
     def install_engine(self, engine: MountEngine) -> bool:
-        """Installa un engine se mancante"""
+        """Installa rclone"""
         if engine == MountEngine.RCLONE:
             return self._install_rclone()
-        elif engine == MountEngine.DAVFS2:
-            return self.webdav_manager.install_davfs2()
         return False
     
     def _install_rclone(self) -> bool:
@@ -82,11 +72,9 @@ class MountManager:
             return False
     
     def configure_engine(self, engine: MountEngine) -> bool:
-        """Configura un engine per uso ottimale"""
+        """Configura rclone"""
         if engine == MountEngine.RCLONE:
             return self._configure_rclone()
-        elif engine == MountEngine.DAVFS2:
-            return self.webdav_manager.configure_davfs2()
         return False
     
     def _configure_rclone(self) -> bool:
@@ -104,129 +92,80 @@ class MountManager:
             print(f"❌ Errore configurazione rclone: {e}")
             return False
     
-    def setup_credentials(self, username: str, password: str, engine: MountEngine = None) -> bool:
-        """Setup credenziali per l'engine specificato"""
-        if not engine:
-            engine = self.preferred_engine
-        
+    def setup_credentials(self, username: str, password: str) -> bool:
+        """Setup credenziali per rclone"""
         base_url, _, _ = get_nc_config()
-        
-        if engine == MountEngine.RCLONE:
-            remote_name = f"nc-{username}"
-            return add_nextcloud_remote(remote_name, base_url, username, password)
-        
-        elif engine == MountEngine.DAVFS2:
-            webdav_url = f"{base_url}/remote.php/dav/files/{username}/"
-            return self.webdav_manager.setup_user_credentials(username, password, webdav_url)
-        
-        return False
+        remote_name = f"nc-{username}"
+        return add_nextcloud_remote(remote_name, base_url, username, password)
     
     def mount_user_home(self, username: str, password: str, home_path: str = None, 
-                       engine: MountEngine = None, profile: str = "full",
-                       auto_fallback: bool = None, remount: bool = False) -> Dict:
+                       profile: str = "full", remount: bool = False, **kwargs) -> Dict:
         """
-        Monta WebDAV nella home directory con engine specificato
+        Monta Nextcloud nella home directory con rclone
         
         Returns:
             Dict con informazioni risultato mount
         """
-        if not engine:
-            engine = self.preferred_engine
-        
-        if auto_fallback is None:
-            auto_fallback = self.config["auto_fallback"]
-        
         if not home_path:
             home_path = f"/home/{username}"
         
         result = {
             "success": False,
-            "engine_used": None,
+            "engine_used": MountEngine.RCLONE,
             "mount_point": home_path,
             "profile": profile,
             "message": "",
             "fallback_used": False
         }
         
-        print(f"🔗 Montando {username} in {home_path} con engine: {engine.value}")
+        print(f"🔗 Montando {username} in {home_path} con rclone (profilo: {profile})")
         
         # Verifica se già montato
         if is_mounted(home_path):
             print(f"✅ {home_path} già montato")
             if remount:
-                print(f"🔗 Richiesto remount per {username} con --remount")
+                print(f"🔗 Richiesto remount per {username}")
                 if self.unmount_user_home(home_path):
                     print(f"✅ {home_path} smontato")
+                else:
+                    result["message"] = "Unmount failed"
+                    return result
             else:
                 result.update({
                     "success": True,
-                    "engine_used": self._detect_mount_engine(home_path),
+                    "engine_used": MountEngine.RCLONE,
                     "message": "Already mounted"
                 })
                 return result
         
-        # Tentativo con engine preferito
-        mount_success = False
-        
-        if engine == MountEngine.RCLONE:
-            mount_success = self._mount_with_rclone(username, password, home_path, profile)
-            result["engine_used"] = MountEngine.RCLONE
-            result["profile"] = profile or "full"
-            
-        elif engine == MountEngine.DAVFS2:
-            mount_success = self._mount_with_davfs2(username, password, home_path)
-            result["engine_used"] = MountEngine.DAVFS2
+        # Mount con rclone
+        mount_success = self._mount_with_rclone(username, password, home_path, profile)
         
         if mount_success:
             result.update({
                 "success": True,
-                "message": f"Mounted with {engine.value}"
+                "message": f"Mounted with rclone"
             })
-            print(f"✅ Mount riuscito con {engine.value}")
+            print(f"✅ Mount riuscito con rclone")
             return result
-        
-        # Fallback se abilitato
-        if auto_fallback and engine == MountEngine.RCLONE:
-            print(f"⚠️ Mount con {engine.value} fallito, tentativo fallback davfs2...")
-            
-            if self._mount_with_davfs2(username, password, home_path):
-                result.update({
-                    "success": True,
-                    "engine_used": MountEngine.DAVFS2,
-                    "fallback_used": True,
-                    "message": "Mounted with davfs2 fallback"
-                })
-                print(f"✅ Mount riuscito con fallback davfs2")
-                return result
-        
-        # Mount completamente fallito
-        result["message"] = f"Mount failed with {engine.value}" + (
-            " and davfs2 fallback" if auto_fallback and engine == MountEngine.RCLONE else ""
-        )
-        print(f"❌ {result['message']}")
-        
-        return result
+        else:
+            result["message"] = f"Mount failed with rclone"
+            print(f"❌ {result['message']}")
+            return result
     
     def _mount_with_rclone(self, username: str, password: str, home_path: str, profile: str = "full") -> bool:
         """Mount con rclone"""
         try:
             # Setup remote se non esiste
             remote_name = f"nc-{username}"
-            if not self.setup_credentials(username, password, MountEngine.RCLONE):
+            if not self.setup_credentials(username, password):
                 print(f"❌ Errore setup credenziali rclone per {username}")
                 return False
             
             # Backup home esistente
-            backup_path = self._backup_existing_home(home_path, username)
-            # uid, gid = get_user_uid_gid(username)
-            # user_permissions = [
-            #     "--uid", str(uid),
-            #     "--gid", str(gid), 
-            #     "--umask", "0022",
-            #     "--file-perms", "0644",
-            #     "--dir-perms", "0755"
-            # ]
-            # Mount con rclone - Configurazione più robusta
+            self._backup_existing_home(home_path, username)
+            
+            # Mount con rclone
             if mount_remote(remote_name, home_path, background=True, profile=profile):
                 # Verifica che il mount sia effettivamente attivo
                 import time
@@ -236,7 +175,7 @@ class MountManager:
                     print(f"❌ Mount non attivo dopo setup per {home_path}")
                     return False
                 
-                # Test basic I/O prima di continuare
+                # Test basic I/O
                 test_file = os.path.join(home_path, ".mount-test")
                 try:
                     with open(test_file, 'w') as f:
@@ -248,16 +187,11 @@ class MountManager:
                     return False
                 
                 # Impostazioni permessi post-mount
-                uid, gid = get_user_uid_gid(username)
-                run(["chown", f"{uid}:{gid}", home_path], check=False)
-                
-                # Ripristina file importanti solo se I/O funziona
-                if backup_path:
-                    try:
-                        self._restore_important_files(backup_path, home_path, username)
-                    except Exception as e:
-                        print(f"⚠️ Avviso ripristino file: {e}")
-                        # Non è critico, continua
+                try:
+                    uid, gid = get_user_uid_gid(username)
+                    run(["chown", f"{uid}:{gid}", home_path], check=False)
+                except:
+                    pass  # Non critico
                 
                 return True
             else:
@@ -268,87 +202,57 @@ class MountManager:
             print(f"❌ Errore mount rclone: {e}")
             return False
     
-    def _mount_with_davfs2(self, username: str, password: str, home_path: str) -> bool:
-        """Mount con davfs2 (fallback)"""
-        try:
-            # Installa/configura davfs2 se necessario
-            if not self.webdav_manager.install_davfs2():
-                return False
-            if not self.webdav_manager.configure_davfs2():
-                return False
+    def _backup_existing_home(self, home_path: str, username: str) -> Optional[str]:
+        """Backup directory home esistente"""
+        if not os.path.exists(home_path):
+            return None
             
-            # Delega al WebDAVMountManager esistente
-            return self.webdav_manager.mount_webdav_home(username, password, home_path)
+        try:
+            import time
+            backup_dir = "/var/backups/nextcloud-wrapper"
+            ensure_dir(backup_dir)
+            
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            backup_filename = f"{username}-home-{timestamp}.tar.gz"
+            backup_path = os.path.join(backup_dir, backup_filename)
+            
+            tar_cmd = [
+                "tar", "-czf", backup_path,
+                "-C", os.path.dirname(home_path),
+                os.path.basename(home_path)
+            ]
+            
+            run(tar_cmd, check=False)
+            print(f"✅ Backup home creato: {backup_path}")
+            return backup_path
             
         except Exception as e:
-            print(f"❌ Errore mount davfs2: {e}")
-            return False
-    
-    def _detect_mount_engine(self, mount_point: str) -> Optional[MountEngine]:
-        """Rileva quale engine sta usando un mount point"""
-        try:
-            mount_output = run(["mount"], check=False)
-            
-            for line in mount_output.split('\n'):
-                if mount_point in line:
-                    if "fuse.rclone" in line or "rclone" in line:
-                        return MountEngine.RCLONE
-                    elif "davfs" in line:
-                        return MountEngine.DAVFS2
-            
+            print(f"⚠️ Errore backup home: {e}")
             return None
-        except:
-            return None
-    
-    def _backup_existing_home(self, home_path: str, username: str) -> Optional[str]:
-        """Backup directory home esistente (riutilizza logica webdav)"""
-        return self.webdav_manager.backup_existing_home(home_path, username)
-    
-    def _restore_important_files(self, backup_path: str, home_path: str, username: str) -> bool:
-        """Ripristina file importanti (riutilizza logica webdav)"""
-        return self.webdav_manager.restore_important_files(backup_path, home_path, username)
     
     def unmount_user_home(self, home_path: str) -> bool:
-        """Smonta home directory (rileva engine automaticamente)"""
-        engine = self._detect_mount_engine(home_path)
-        
-        if engine == MountEngine.RCLONE:
+        """Smonta home directory"""
+        try:
             return unmount(home_path)
-        elif engine == MountEngine.DAVFS2:
-            return self.webdav_manager.unmount_webdav(home_path)
-        else:
-            # Tentativo generico
-            try:
-                run(["fusermount", "-u", home_path], check=False)
-                run(["umount", home_path], check=False)
-                return True
-            except:
-                return False
+        except:
+            return False
     
     def create_systemd_service(self, username: str, password: str, home_path: str = None,
-                              engine: MountEngine = None, profile: str = "full") -> str:
-        """Crea servizio systemd per mount automatico"""
-        if not engine:
-            engine = self.preferred_engine
-        
+                              profile: str = "full") -> str:
+        """Crea servizio systemd per mount automatico rclone"""
         if not home_path:
             home_path = f"/home/{username}"
         
-        service_name = f"{self.config['service_prefix']}-{engine.value}-{username}"
+        service_name = f"{self.config['service_prefix']}-rclone-{username}"
         
-        if engine == MountEngine.RCLONE:
-            # Setup remote prima di creare servizio
-            remote_name = f"nc-{username}"
-            self.setup_credentials(username, password, MountEngine.RCLONE)
-            
-            # Usa il generatore rclone esistente
-            service_content = create_systemd_mount_service(
-                service_name, remote_name, home_path, "root", profile or "writes"
-            )
-        elif engine == MountEngine.DAVFS2:
-            # Usa il generatore webdav esistente
-            service_name = self.webdav_manager.create_systemd_service(username, password, home_path)
-            return service_name
+        # Setup remote prima di creare servizio
+        remote_name = f"nc-{username}"
+        self.setup_credentials(username, password)
+        
+        # Usa il generatore rclone
+        service_content = create_systemd_mount_service(
+            service_name, remote_name, home_path, "root", profile or "full"
+        )
         
         # Scrivi file servizio
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -362,10 +266,9 @@ class MountManager:
         return service_name
     
     def list_mounts(self) -> List[Dict]:
-        """Lista tutti i mount attivi con informazioni engine"""
+        """Lista tutti i mount rclone attivi"""
         mounts = []
         
-        # Mount rclone
         try:
             mount_output = run(["mount", "-t", "fuse.rclone"], check=False)
             for line in mount_output.split('\n'):
@@ -382,17 +285,6 @@ class MountManager:
         except:
             pass
         
-        # Mount davfs2
-        webdav_mounts = self.webdav_manager.list_webdav_mounts()
-        for mount in webdav_mounts:
-            mounts.append({
-                "engine": MountEngine.DAVFS2,
-                "remote": mount.get("url", ""),
-                "mountpoint": mount.get("mountpoint", ""),
-                "type": "davfs2",
-                "options": mount.get("options", "")
-            })
-        
         return mounts
     
     def get_mount_status(self, home_path: str) -> Dict:
@@ -404,28 +296,12 @@ class MountManager:
                 "status": "Not mounted"
             }
         
-        engine = self._detect_mount_engine(home_path)
-        
-        if engine == MountEngine.RCLONE:
-            return {
-                "mounted": True,
-                "engine": MountEngine.RCLONE,
-                "status": "Active (rclone)",
-                "profile": self._detect_rclone_profile(home_path)
-            }
-        elif engine == MountEngine.DAVFS2:
-            return {
-                "mounted": True,
-                "engine": MountEngine.DAVFS2,
-                "status": "Active (davfs2)",
-                **self.webdav_manager.get_mount_status(home_path)
-            }
-        else:
-            return {
-                "mounted": True,
-                "engine": "unknown",
-                "status": "Active (unknown engine)"
-            }
+        return {
+            "mounted": True,
+            "engine": MountEngine.RCLONE,
+            "status": "Active (rclone)",
+            "profile": self._detect_rclone_profile(home_path)
+        }
     
     def _detect_rclone_profile(self, mount_point: str) -> Optional[str]:
         """Rileva profilo rclone da mount attivo (se possibile)"""
@@ -434,7 +310,7 @@ class MountManager:
             services = run(["systemctl", "list-units", "--type=service", "--state=active"], check=False)
             for line in services.split('\n'):
                 if f"rclone" in line and mount_point.replace("/", "/") in line:
-                    # Questo è approssimativo, potremmo migliorare
+                    # Questo è approssimativo
                     if "full" in line:
                         return "full"
                     elif "writes" in line:
@@ -444,52 +320,20 @@ class MountManager:
                     elif "hosting" in line:
                         return "hosting"
             
-            return "cannot detect"  # Default
+            return "cannot detect"
         except:
             return None
-    
-    def get_recommended_engine(self) -> MountEngine:
-        """Consiglia engine migliore per il sistema corrente"""
-        available = self.detect_available_engines()
-        
-        if available[MountEngine.RCLONE]:
-            return MountEngine.RCLONE
-        elif available[MountEngine.DAVFS2]:
-            return MountEngine.DAVFS2
-        else:
-            # Preferiamo installare rclone
-            return MountEngine.RCLONE
-    
-    def get_mount_profiles(self, engine: MountEngine = None) -> Dict:
-        """Ottieni profili mount disponibili per engine"""
-        if not engine:
-            engine = self.preferred_engine
-        
-        if engine == MountEngine.RCLONE:
-            return MOUNT_PROFILES
-        elif engine == MountEngine.DAVFS2:
-            return {
-                "default": {
-                    "description": "Configurazione davfs2 ottimizzata",
-                    "use_case": "WebDAV diretto con cache locale",
-                    "storage": "Configurabile (default 10GB)",
-                    "performance": "Buona con cache",
-                    "sync": "Bidirezionale"
-                }
-            }
-        
-        return {}
 
 
 def setup_user_with_mount(username: str, password: str, quota: str = None,
                          profile: str = "full", remount: bool = False) -> bool:
     """
-    Setup completo utente con rclone engine (v1.0.0rc2)
+    Setup completo utente con rclone engine (v1.0.0rc2 semplificato)
     
     Args:
         username: Nome utente
         password: Password
-        quota: Quota Nextcloud (es. "100G") - solo info
+        quota: Quota Nextcloud (es. "100G") - solo per info
         profile: Profilo rclone mount
         remount: Forza remount se già esistente
     
@@ -498,12 +342,19 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
     """
     print(f"🚀 Setup completo per {username} (v1.0.0rc2 - rclone)")
     
+    # Validazione profilo
+    from .rclone import MOUNT_PROFILES
+    if profile not in MOUNT_PROFILES:
+        print(f"❌ Profilo non valido: {profile}")
+        print(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
+        return False
+    
     mount_manager = MountManager(MountEngine.RCLONE)
     
     # 1. Verifica e installa rclone
     available_engines = mount_manager.detect_available_engines()
     if not available_engines[MountEngine.RCLONE]:
-        print(f"📦 Installando rclone...")
+        print("📦 Installando rclone...")
         if not mount_manager.install_engine(MountEngine.RCLONE):
             return False
     
@@ -534,54 +385,47 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
     else:
         print(f"ℹ️ Utente Linux già esistente: {username}")
     
-    # 5. Mount con rclone (v1.0)
+    # 5. Mount con rclone (v1.0 - no fallback, solo rclone)
     home_path = f"/home/{username}"
     mount_result = mount_manager.mount_user_home(
         username=username,
         password=password, 
         home_path=home_path,
-        engine=MountEngine.RCLONE,
         profile=profile,
         remount=remount
     )
-
     
     if not mount_result["success"]:
         print(f"❌ {mount_result['message']}")
         return False
     
-    engine_used = mount_result["engine_used"]
-    if mount_result["fallback_used"]:
-        print(f"⚠️ Usato fallback {engine_used.value}")
-    else:
-        print(f"✅ Mount riuscito con {engine_used.value}")
+    print(f"✅ Mount rclone riuscito")
+    print(f"📊 Profilo: {mount_result.get('profile', profile)}")
     
-    if mount_result.get("profile"):
-        print(f"📊 Profilo: {mount_result['profile']}")
+    # 6. Gestione spazio v1.0 (automatica via rclone)
+    profile_info = MOUNT_PROFILES.get(profile, {})
+    if profile_info.get('storage'):
+        print(f"💾 Cache rclone: {profile_info['storage']}")
+    print("✅ Gestione spazio: automatica via rclone (cache LRU)")
     
-    # 6. Setup quota se richiesta
-    if quota:
-        from .quota import setup_quota_for_user
-        if setup_quota_for_user(username, quota, fs_percentage):
-            print(f"✅ Quota configurata: {quota}")
-        else:
-            print(f"⚠️ Avviso: errore configurazione quota")
-    
-    # 7. Crea servizio systemd
+    # 7. Crea servizio systemd rclone
     try:
         service_name = mount_manager.create_systemd_service(
-            username, password, home_path, engine_used, mount_result.get("profile")
+            username, password, home_path, profile
         )
         
         # Abilita servizio
+        from .utils import run
         run(["systemctl", "enable", "--now", f"{service_name}.service"], check=False)
-        print(f"✅ Servizio automatico: {service_name}")
+        print(f"✅ Servizio systemd: {service_name}")
         
     except Exception as e:
         print(f"⚠️ Avviso servizio systemd: {e}")
     
     print(f"🎉 Setup completato per {username}")
-    print(f"Engine: {engine_used.value}" + (f" (profilo: {mount_result.get('profile', 'default')})" if engine_used == MountEngine.RCLONE else ""))
-    print(f"Home directory: {home_path} → Nextcloud WebDAV")
+    print(f"• Engine: rclone")
+    print(f"• Profilo: {profile}")
+    print(f"• Home directory: {home_path} → Nextcloud WebDAV")
+    print(f"• Gestione spazio: automatica (cache LRU)")
     
     return True
