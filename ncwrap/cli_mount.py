@@ -1,5 +1,6 @@
 """
-CLI Mount - Gestione mount unificato (rclone + davfs2)
+CLI Mount - Gestione mount rclone (v1.0 semplificato)
+Solo rclone engine con 4 profili
 """
 import typer
 import sys
@@ -11,68 +12,21 @@ from rich.table import Table
 from rich import print as rprint
 from rich.prompt import Prompt, Confirm
 
-from .mount import MountManager, MountEngine, setup_user_with_mount
+from .mount import MountManager, setup_user_with_mount
 from .utils import check_sudo_privileges, is_mounted, bytes_to_human, get_directory_size
 from .api import test_webdav_connectivity
+from .rclone import MOUNT_PROFILES, check_connectivity
 
-mount_app = typer.Typer(help="Gestione mount unificato (rclone/davfs2)")
+mount_app = typer.Typer(help="Gestione mount rclone (engine unico)")
 console = Console()
 
 
-@mount_app.command("engines")
-def list_engines():
-    """Mostra engine di mount disponibili"""
-    rprint("[blue]🔧 Engine di mount disponibili[/blue]")
-    
-    mount_manager = MountManager()
-    available = mount_manager.detect_available_engines()
-    recommended = mount_manager.get_recommended_engine()
-    
-    table = Table(title="Engine Mount Nextcloud")
-    table.add_column("Engine", style="cyan")
-    table.add_column("Disponibile", style="white")
-    table.add_column("Status", style="green")
-    table.add_column("Caratteristiche", style="yellow")
-    
-    table.add_row(
-        "rclone",
-        "✅ Sì" if available[MountEngine.RCLONE] else "❌ No",
-        "🚀 Consigliato" if recommended == MountEngine.RCLONE else "📋 Disponibile",
-        "Performance superiori, profili cache, VFS avanzato"
-    )
-    
-    table.add_row(
-        "davfs2",
-        "✅ Sì" if available[MountEngine.DAVFS2] else "❌ No", 
-        "🛡️ Fallback" if recommended == MountEngine.RCLONE else "📋 Disponibile",
-        "Compatibilità massima, cache disco, supporto lock"
-    )
-    
-    console.print(table)
-    
-    rprint(f"\n[bold green]🎯 Engine raccomandato: {recommended.value}[/bold green]")
-    
-    if not available[recommended]:
-        rprint(f"[yellow]⚠️ Engine raccomandato non installato[/yellow]")
-        rprint(f"💡 Installa con: nextcloud-wrapper mount install {recommended.value}")
-
-
 @mount_app.command("profiles") 
-def list_profiles(
-    engine: str = typer.Option("rclone", help="Engine per cui mostrare i profili")
-):
-    """Mostra profili mount disponibili"""
-    mount_engine = MountEngine(engine.lower())
-    rprint(f"[blue]📊 Profili mount per {engine}[/blue]")
+def list_profiles():
+    """Mostra profili mount rclone disponibili"""
+    rprint("[blue]📊 Profili mount rclone[/blue]")
     
-    mount_manager = MountManager()
-    profiles = mount_manager.get_mount_profiles(mount_engine)
-    
-    if not profiles:
-        rprint(f"[yellow]Nessun profilo disponibile per {engine}[/yellow]")
-        return
-    
-    for profile_name, profile_info in profiles.items():
+    for profile_name, profile_info in MOUNT_PROFILES.items():
         rprint(f"\n[bold cyan]📋 Profilo: {profile_name}[/bold cyan]")
         rprint(f"📝 {profile_info['description']}")
         rprint(f"🎯 Uso: {profile_info['use_case']}")
@@ -86,19 +40,23 @@ def mount_user(
     username: str = typer.Argument(help="Nome utente"),
     password: str = typer.Argument(help="Password"),
     mount_point: str = typer.Option(None, help="Directory mount (default: /home/username)"),
-    engine: str = typer.Option("rclone", help="Engine mount (rclone/davfs2)"),
-    profile: str = typer.Option("writes", help="Profilo mount (solo rclone)"),
+    profile: str = typer.Option("full", help="Profilo mount (hosting/minimal/writes/full)"),
     auto_service: bool = typer.Option(True, "--service/--no-service", help="Crea servizio systemd"),
-    force: bool = typer.Option(False, "--force", help="Forza mount anche se directory non vuota")
+    force: bool = typer.Option(False, "--force", help="Forza mount anche se directory non vuota"),
+    remount: bool = typer.Option(False, "--remount", help="Forza remount se già montato")
 ):
-    """Monta Nextcloud in directory utente"""
-    mount_engine = MountEngine(engine.lower())
-    
+    """Monta Nextcloud con rclone"""
     if not mount_point:
         mount_point = f"/home/{username}"
     
-    rprint(f"[blue]🔗 Mount {username} → {mount_point}[/blue]")
-    rprint(f"Engine: {engine} | Profilo: {profile if mount_engine == MountEngine.RCLONE else 'default'}")
+    # Valida profilo
+    if profile not in MOUNT_PROFILES:
+        rprint(f"[red]❌ Profilo non valido: {profile}[/red]")
+        rprint(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
+        sys.exit(1)
+    
+    rprint(f"[blue]🔗 Mount rclone {username} → {mount_point}[/blue]")
+    rprint(f"Profilo: {profile} ({MOUNT_PROFILES[profile]['description']})")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
@@ -107,27 +65,27 @@ def mount_user(
     try:
         mount_manager = MountManager()
         
-        # Verifica engine disponibile
-        available = mount_manager.detect_available_engines()
-        if not available[mount_engine]:
-            rprint(f"[red]❌ Engine {engine} non disponibile[/red]")
+        # Installa rclone se necessario
+        if not mount_manager.is_rclone_available():
+            rprint("[yellow]⚠️ rclone non trovato[/yellow]")
             
-            install = Confirm.ask(f"Installare {engine}?")
+            install = Confirm.ask("Installare rclone?")
             if install:
-                if not mount_manager.install_engine(mount_engine):
-                    rprint(f"[red]❌ Installazione {engine} fallita[/red]")
+                if not mount_manager.install_rclone():
+                    rprint("[red]❌ Installazione rclone fallita[/red]")
                     sys.exit(1)
             else:
                 sys.exit(1)
         
         # Test connettività prima del mount
+        rprint("[blue]🔍 Test connettività WebDAV...[/blue]")
         if not test_webdav_connectivity(username, password):
             rprint("[red]❌ Test connettività WebDAV fallito[/red]")
             rprint("💡 Verifica credenziali e URL Nextcloud")
             sys.exit(1)
         
         # Verifica directory esistente se non force
-        if not force and os.path.exists(mount_point):
+        if not force and os.path.exists(mount_point) and not remount:
             try:
                 contents = os.listdir(mount_point)
                 if contents and not is_mounted(mount_point):
@@ -140,27 +98,26 @@ def mount_user(
             except PermissionError:
                 pass
         
-        # Mount
+        # Mount con rclone
         result = mount_manager.mount_user_home(
-            username, password, mount_point, mount_engine, 
-            profile if mount_engine == MountEngine.RCLONE else None
+            username, password, mount_point, profile, remount
         )
         
         if result["success"]:
-            engine_used = result["engine_used"]
-            rprint(f"[green]✅ Mount riuscito con {engine_used.value}[/green]")
+            rprint(f"[green]✅ Mount riuscito con rclone[/green]")
+            rprint(f"[cyan]📊 Profilo: {result['profile']}[/cyan]")
             
-            if result["fallback_used"]:
-                rprint(f"[yellow]⚠️ Usato fallback {engine_used.value}[/yellow]")
-            
-            if result.get("profile"):
-                rprint(f"[cyan]📊 Profilo: {result['profile']}[/cyan]")
+            # Mostra info profilo
+            profile_info = MOUNT_PROFILES.get(result['profile'], {})
+            if profile_info:
+                rprint(f"💾 Cache: {profile_info.get('storage', 'N/A')}")
+                rprint(f"🔄 Sync: {profile_info.get('sync', 'N/A')}")
             
             # Crea servizio automatico
             if auto_service:
                 try:
                     service_name = mount_manager.create_systemd_service(
-                        username, password, mount_point, engine_used, result.get("profile")
+                        username, password, mount_point, profile
                     )
                     
                     # Abilita servizio
@@ -182,8 +139,8 @@ def mount_user(
 def unmount_user(
     mount_point: str = typer.Argument(help="Directory da smontare")
 ):
-    """Smonta directory utente"""
-    rprint(f"[blue]📁 Smontando: {mount_point}[/blue]")
+    """Smonta directory rclone"""
+    rprint(f"[blue]📁 Smontando rclone: {mount_point}[/blue]")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
@@ -207,21 +164,21 @@ def unmount_user(
 def mount_status(
     detailed: bool = typer.Option(False, "--detailed", help="Mostra informazioni dettagliate")
 ):
-    """Mostra status di tutti i mount"""
-    rprint("[blue]📊 Status mount Nextcloud[/blue]")
+    """Mostra status di tutti i mount rclone"""
+    rprint("[blue]📊 Status mount rclone[/blue]")
     
     mount_manager = MountManager()
     mounts = mount_manager.list_mounts()
     
     if not mounts:
-        rprint("[yellow]Nessun mount attivo trovato[/yellow]")
+        rprint("[yellow]Nessun mount rclone trovato[/yellow]")
+        rprint("💡 Crea un mount con: nextcloud-wrapper mount mount <user> <password>")
         return
     
-    table = Table(title="Mount Attivi")
-    table.add_column("Engine", style="cyan")
-    table.add_column("Remote/URL", style="blue")
+    table = Table(title="Mount rclone Attivi")
+    table.add_column("Remote", style="blue")
     table.add_column("Mount Point", style="white")
-    table.add_column("Type", style="green")
+    table.add_column("Type", style="cyan")
     
     if detailed:
         table.add_column("Options", style="yellow")
@@ -232,10 +189,9 @@ def mount_status(
         status = "🟢 Attivo" if is_mounted(mount_point) else "🔴 Inattivo"
         
         row = [
-            mount["engine"].value,
             mount.get("remote", "")[:50] + ("..." if len(mount.get("remote", "")) > 50 else ""),
             mount_point,
-            mount.get("type", "")
+            mount.get("type", "rclone")
         ]
         
         if detailed:
@@ -248,24 +204,16 @@ def mount_status(
     
     console.print(table)
     
-    # Statistiche
-    rclone_count = sum(1 for m in mounts if m["engine"] == MountEngine.RCLONE)
-    davfs2_count = sum(1 for m in mounts if m["engine"] == MountEngine.DAVFS2)
-    
-    rprint(f"\n[bold]📊 Riepilogo:[/bold]")
-    rprint(f"• Mount rclone: {rclone_count}")
-    rprint(f"• Mount davfs2: {davfs2_count}")
-    rprint(f"• Totale: {len(mounts)}")
+    rprint(f"\n[bold]📊 Totale mount rclone: {len(mounts)}[/bold]")
 
 
 @mount_app.command("info")
 def mount_info(
     mount_point: str = typer.Argument(help="Directory mount da analizzare"),
     check_space: bool = typer.Option(False, "--check-space", help="Calcola spazio occupato")
-
 ):
-    """Informazioni dettagliate su un mount specifico"""
-    rprint(f"[blue]🔍 Informazioni mount: {mount_point}[/blue]")
+    """Informazioni dettagliate su un mount rclone"""
+    rprint(f"[blue]🔍 Informazioni mount rclone: {mount_point}[/blue]")
     
     mount_manager = MountManager()
     status = mount_manager.get_mount_status(mount_point)
@@ -275,298 +223,204 @@ def mount_info(
         return
     
     # Tabella informazioni base
-    info_table = Table(title=f"Mount Info - {mount_point}")
+    info_table = Table(title=f"Mount rclone Info - {mount_point}")
     info_table.add_column("Proprietà", style="cyan")
     info_table.add_column("Valore", style="white")
     
     info_table.add_row("Mount Point", mount_point)
-    info_table.add_row("Engine", status.get("engine", "unknown").value if hasattr(status.get("engine"), "value") else str(status.get("engine")))
+    info_table.add_row("Engine", "rclone")
     info_table.add_row("Status", status.get("status", "Unknown"))
     
     if status.get("profile"):
-        info_table.add_row("Profilo", status["profile"])
+        profile = status["profile"]
+        info_table.add_row("Profilo", profile)
+        
+        # Info profilo dettagliate
+        if profile in MOUNT_PROFILES:
+            profile_info = MOUNT_PROFILES[profile]
+            info_table.add_row("Cache", profile_info.get("storage", "N/A"))
+            info_table.add_row("Performance", profile_info.get("performance", "N/A"))
+            info_table.add_row("Sync", profile_info.get("sync", "N/A"))
     
     console.print(info_table)
     
     # Informazioni spazio
     try:
         if is_mounted(mount_point) and check_space:
-            rprint(f"\n[yellow]Calcolo spazio occupato (...)[/yellow]")
+            rprint(f"\n[yellow]📊 Calcolo spazio utilizzato...[/yellow]")
             used_space = get_directory_size(mount_point)
             rprint(f"\n[bold]💾 Utilizzo spazio:[/bold]")
             rprint(f"• Spazio utilizzato: {bytes_to_human(used_space)}")
+            rprint(f"• Gestione cache: automatica via rclone")
     except Exception as e:
         rprint(f"[yellow]⚠️ Errore informazioni spazio: {e}[/yellow]")
 
 
-@mount_app.command("migrate")
-def migrate_mount(
-    mount_point: str = typer.Argument(help="Mount point da migrare"),
-    target_engine: str = typer.Argument(help="Engine target (rclone/davfs2)"),
-    profile: str = typer.Option("full", help="Profilo per rclone"),
-    backup: bool = typer.Option(True, "--backup/--no-backup", help="Backup configurazione")
+@mount_app.command("test")
+def test_mount(
+    username: str = typer.Argument(help="Username per test"),
+    password: str = typer.Argument(help="Password per test"),
+    profile: str = typer.Option("minimal", help="Profilo per test")
 ):
-    """Migra un mount esistente ad un altro engine"""
-    try:
-        target = MountEngine(target_engine.lower())
-    except ValueError:
-        rprint(f"[red]❌ Engine non supportato: {target_engine}[/red]")
-        rprint("💡 Engine supportati: rclone, davfs2")
-        sys.exit(1)
-    
-    rprint(f"[blue]🔄 Migrazione mount {mount_point} → {target_engine}[/blue]")
+    """Test mount rclone temporaneo"""
+    rprint(f"[blue]🧪 Test mount rclone per {username}[/blue]")
+    rprint(f"Profilo test: {profile}")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
         sys.exit(1)
     
-    mount_manager = MountManager()
-    
-    # Verifica mount esistente
-    status = mount_manager.get_mount_status(mount_point)
-    if not status["mounted"]:
-        rprint(f"[red]❌ {mount_point} non è montato[/red]")
+    # Verifica profilo
+    if profile not in MOUNT_PROFILES:
+        rprint(f"[red]❌ Profilo non valido: {profile}[/red]")
         sys.exit(1)
     
-    current_engine = status.get("engine")
-    if current_engine == target and status.get("profile") == profile:
-        rprint(f"[yellow]⚠️ Mount già usa {target_engine} e profilo {profile}[/yellow]")
-        return
-    
-    rprint(f"[cyan]Migrazione: {current_engine.value if hasattr(current_engine, 'value') else current_engine} → {target_engine} con profilo {profile}[/cyan]")
-    
-    # Conferma
-    if not Confirm.ask("Continuare con la migrazione?"):
-        rprint("[cyan]Migrazione annullata[/cyan]")
-        return
+    test_dir = f"/tmp/ncwrap-test-{username}-{int(time.time())}"
     
     try:
-        # Estrai username dal mount point (assumendo /home/username)
-        username = os.path.basename(mount_point)
+        mount_manager = MountManager()
         
-        # Chiedi password (necessaria per rimount)
-        password = Prompt.ask(f"Password per {username}", password=True)
+        # Installa rclone se necessario
+        if not mount_manager.is_rclone_available():
+            rprint("[red]❌ rclone non disponibile[/red]")
+            sys.exit(1)
         
         # Test connettività
+        rprint("[blue]🔍 Test connettività...[/blue]")
         if not test_webdav_connectivity(username, password):
             rprint("[red]❌ Test connettività fallito[/red]")
             sys.exit(1)
         
-        # Backup directory se richiesto
-        if backup:
-            import shutil
-            import time
-            backup_path = f"{mount_point}.migration-backup.{int(time.time())}"
-            try:
-                # Copia solo file di configurazione locali
-                config_files = ['.bashrc', '.profile', '.bash_profile', '.vimrc', '.gitconfig']
-                os.makedirs(backup_path, exist_ok=True)
-                
-                for config_file in config_files:
-                    src = os.path.join(mount_point, config_file)
-                    if os.path.exists(src):
-                        shutil.copy2(src, backup_path)
-                        
-                rprint(f"[green]📦 Backup creato: {backup_path}[/green]")
-            except Exception as e:
-                rprint(f"[yellow]⚠️ Avviso backup: {e}[/yellow]")
-        
-        # Unmount corrente
-        rprint(f"[blue]📁 Smontando mount corrente...[/blue]")
-        if not mount_manager.unmount_user_home(mount_point):
-            rprint("[red]❌ Errore unmount[/red]")
-            sys.exit(1)
-        
-        # Mount con nuovo engine
-        rprint(f"[blue]🔗 Rimontando con {target_engine}...[/blue]")
+        # Mount temporaneo
+        rprint(f"[blue]🔗 Mount temporaneo in {test_dir}...[/blue]")
         result = mount_manager.mount_user_home(
-            username, password, mount_point, target,
-            profile if target == MountEngine.RCLONE else None
+            username, password, test_dir, profile
         )
         
-        if result["success"]:
-            rprint(f"[green]✅ Migrazione completata![/green]")
-            rprint(f"[cyan]Nuovo engine: {result['engine_used'].value}[/cyan]")
-            
-            if result.get("profile"):
-                rprint(f"[cyan]Profilo: {result['profile']}[/cyan]")
-        else:
-            rprint(f"[red]❌ Migrazione fallita: {result['message']}[/red]")
+        if not result["success"]:
+            rprint(f"[red]❌ Mount fallito: {result['message']}[/red]")
             sys.exit(1)
+        
+        rprint("[green]✅ Mount test riuscito[/green]")
+        
+        # Test I/O base
+        try:
+            rprint("[blue]📝 Test I/O...[/blue]")
             
+            test_file = f"{test_dir}/test-io.txt"
+            test_content = f"Test rclone {time.time()}"
+            
+            # Write test
+            with open(test_file, 'w') as f:
+                f.write(test_content)
+            
+            # Read test
+            with open(test_file, 'r') as f:
+                read_content = f.read()
+            
+            if read_content == test_content:
+                rprint("[green]✅ Test I/O riuscito[/green]")
+            else:
+                rprint("[red]❌ Test I/O fallito (contenuto diverso)[/red]")
+            
+            # List test
+            files = os.listdir(test_dir)
+            rprint(f"[cyan]📁 File in mount: {len(files)}[/cyan]")
+            
+            # Cleanup test file
+            os.remove(test_file)
+            
+        except Exception as e:
+            rprint(f"[yellow]⚠️ Test I/O parzialmente fallito: {e}[/yellow]")
+        
+        # Informazioni mount
+        status = mount_manager.get_mount_status(test_dir)
+        rprint(f"[cyan]📊 Status: {status.get('status', 'N/A')}[/cyan]")
+        rprint(f"[cyan]📋 Profilo: {status.get('profile', 'N/A')}[/cyan]")
+        
+        rprint("[green]🎉 Test completato con successo![/green]")
+        
     except Exception as e:
-        rprint(f"[red]❌ Errore migrazione: {e}[/red]")
-        sys.exit(1)
+        rprint(f"[red]❌ Errore test: {e}[/red]")
+    finally:
+        # Cleanup mount temporaneo
+        try:
+            rprint("[blue]🧹 Cleanup mount test...[/blue]")
+            mount_manager.unmount_user_home(test_dir)
+            if os.path.exists(test_dir):
+                os.rmdir(test_dir)
+            rprint("[green]✅ Cleanup completato[/green]")
+        except Exception as e:
+            rprint(f"[yellow]⚠️ Avviso cleanup: {e}[/yellow]")
 
 
-@mount_app.command("benchmark")
-def benchmark_engines(
-    username: str = typer.Argument(help="Username per test"),
-    test_dir: str = typer.Option("/tmp/ncwrap-benchmark", help="Directory test"),
-    file_size_mb: int = typer.Option(10, help="Dimensione file test in MB"),
-    iterations: int = typer.Option(3, help="Numero iterazioni per test")
+@mount_app.command("setup")
+def setup_complete(
+    username: str = typer.Argument(help="Nome utente"),
+    password: str = typer.Argument(help="Password"),
+    profile: str = typer.Option("full", help="Profilo mount"),
+    no_service: bool = typer.Option(False, help="Non creare servizio systemd"),
+    remount: bool = typer.Option(False, help="Forza remount se esistente")
 ):
-    """Benchmark performance engine di mount"""
-    rprint(f"[blue]⚡ Benchmark engine mount per {username}[/blue]")
-    rprint(f"Test: file {file_size_mb}MB, {iterations} iterazioni")
+    """Setup completo utente con rclone (v1.0)"""
+    # Valida profilo
+    if profile not in MOUNT_PROFILES:
+        rprint(f"[red]❌ Profilo non valido: {profile}[/red]")
+        rprint(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
+        sys.exit(1)
+    
+    rprint(f"[blue]🚀 Setup completo per {username}[/blue]")
+    rprint(f"Profilo: {profile} ({MOUNT_PROFILES[profile]['description']})")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
         sys.exit(1)
     
-    password = Prompt.ask(f"Password per {username}", password=True)
-    
-    # Test connettività
-    if not test_webdav_connectivity(username, password):
-        rprint("[red]❌ Test connettività WebDAV fallito[/red]")
-        sys.exit(1)
-    
-    mount_manager = MountManager()
-    available = mount_manager.detect_available_engines()
-    
-    # Prepara directory test
-    os.makedirs(test_dir, exist_ok=True)
-    
-    results = {}
-    
-    for engine in [MountEngine.RCLONE, MountEngine.DAVFS2]:
-        if not available[engine]:
-            rprint(f"[yellow]⚠️ {engine.value} non disponibile, skip[/yellow]")
-            continue
-        
-        rprint(f"\n[bold cyan]🧪 Test {engine.value}[/bold cyan]")
-        
-        test_mount = f"{test_dir}/{engine.value}-{username}"
-        
-        try:
-            # Mount
-            result = mount_manager.mount_user_home(
-                username, password, test_mount, engine,
-                "writes" if engine == MountEngine.RCLONE else None
-            )
-            
-            if not result["success"]:
-                rprint(f"[red]❌ Mount {engine.value} fallito[/red]")
-                continue
-            
-            # Benchmark
-            import time
-            import random
-            import string
-            
-            times = {"write": [], "read": [], "list": []}
-            
-            for i in range(iterations):
-                rprint(f"[blue]  Iterazione {i+1}/{iterations}[/blue]")
-                
-                # Write test
-                test_file = f"{test_mount}/benchmark_{i}.dat"
-                test_data = ''.join(random.choices(string.ascii_letters, k=file_size_mb * 1024 * 1024))
-                
-                start = time.time()
-                with open(test_file, 'w') as f:
-                    f.write(test_data)
-                write_time = time.time() - start
-                times["write"].append(write_time)
-                
-                # Read test
-                start = time.time()
-                with open(test_file, 'r') as f:
-                    _ = f.read()
-                read_time = time.time() - start
-                times["read"].append(read_time)
-                
-                # List test
-                start = time.time()
-                _ = os.listdir(test_mount)
-                list_time = time.time() - start
-                times["list"].append(list_time)
-                
-                # Cleanup
-                os.remove(test_file)
-            
-            # Calcola medie
-            avg_write = sum(times["write"]) / len(times["write"])
-            avg_read = sum(times["read"]) / len(times["read"])
-            avg_list = sum(times["list"]) / len(times["list"])
-            
-            results[engine.value] = {
-                "write": avg_write,
-                "read": avg_read,
-                "list": avg_list,
-                "write_speed": file_size_mb / avg_write if avg_write > 0 else 0,  # MB/s
-                "read_speed": file_size_mb / avg_read if avg_read > 0 else 0       # MB/s
-            }
-            
-            rprint(f"[green]✅ {engine.value} completato[/green]")
-            
-        except Exception as e:
-            rprint(f"[red]❌ Errore test {engine.value}: {e}[/red]")
-        finally:
-            # Cleanup mount
-            try:
-                mount_manager.unmount_user_home(test_mount)
-                if os.path.exists(test_mount):
-                    os.rmdir(test_mount)
-            except:
-                pass
-    
-    # Mostra risultati
-    if results:
-        rprint(f"\n[bold blue]📊 Risultati benchmark[/bold blue]")
-        
-        table = Table(title=f"Performance Test - File {file_size_mb}MB")
-        table.add_column("Engine", style="cyan")
-        table.add_column("Write (s)", style="white")
-        table.add_column("Read (s)", style="white")
-        table.add_column("List (s)", style="white")
-        table.add_column("Write Speed", style="green")
-        table.add_column("Read Speed", style="green")
-        
-        for engine, metrics in results.items():
-            table.add_row(
-                engine,
-                f"{metrics['write']:.2f}",
-                f"{metrics['read']:.2f}",
-                f"{metrics['list']:.3f}",
-                f"{metrics['write_speed']:.1f} MB/s",
-                f"{metrics['read_speed']:.1f} MB/s"
-            )
-        
-        console.print(table)
-        
-        # Raccomandazione
-        if len(results) > 1:
-            best_write = min(results.items(), key=lambda x: x[1]['write'])
-            best_read = min(results.items(), key=lambda x: x[1]['read'])
-            
-            rprint(f"\n[bold green]🏆 Engine migliori:[/bold green]")
-            rprint(f"• Scrittura: {best_write[0]} ({best_write[1]['write_speed']:.1f} MB/s)")
-            rprint(f"• Lettura: {best_read[0]} ({best_read[1]['read_speed']:.1f} MB/s)")
-    
-    # Cleanup directory test
     try:
-        import shutil
-        if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
-    except:
-        pass
+        # Test connettività prima di iniziare
+        rprint("[blue]🔍 Test connettività WebDAV...[/blue]")
+        if not test_webdav_connectivity(username, password):
+            rprint("[red]❌ Test connettività WebDAV fallito[/red]")
+            rprint("💡 Verifica credenziali e configurazione NC_BASE_URL")
+            sys.exit(1)
+        
+        # Setup completo con funzione semplificata
+        success = setup_user_with_mount(
+            username=username,
+            password=password, 
+            profile=profile,
+            remount=remount
+        )
+        
+        if success:
+            rprint(f"[green]🎉 Setup completo riuscito per {username}![/green]")
+            
+            # Mostra riepilogo
+            rprint(f"\n[bold blue]📋 Riepilogo configurazione:[/bold blue]")
+            rprint(f"• Utente Nextcloud: {username}")
+            rprint(f"• Utente Linux: {username}")
+            rprint(f"• Home directory: /home/{username} → rclone mount")
+            rprint(f"• Profilo rclone: {profile}")
+            rprint(f"• Cache: {MOUNT_PROFILES[profile].get('storage', 'N/A')}")
+            rprint(f"• Servizio systemd: {'✅' if not no_service else '❌'}")
+            
+            rprint(f"\n[bold green]💡 Mount automatico attivo al boot![/bold green]")
+            
+        else:
+            rprint("[red]❌ Setup fallito[/red]")
+            sys.exit(1)
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore setup: {e}[/red]")
+        sys.exit(1)
 
 
 @mount_app.command("install")
-def install_engine(
-    engine: str = typer.Argument(help="Engine da installare (rclone/davfs2)"),
+def install_rclone(
     configure: bool = typer.Option(True, "--configure/--no-configure", help="Configura dopo installazione")
 ):
-    """Installa engine di mount"""
-    try:
-        mount_engine = MountEngine(engine.lower())
-    except ValueError:
-        rprint(f"[red]❌ Engine non supportato: {engine}[/red]")
-        rprint("💡 Engine supportati: rclone, davfs2")
-        sys.exit(1)
-        
-    rprint(f"[blue]📦 Installazione {engine}[/blue]")
+    """Installa rclone"""
+    rprint("[blue]📦 Installazione rclone[/blue]")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
@@ -576,31 +430,30 @@ def install_engine(
         mount_manager = MountManager()
         
         # Verifica se già installato
-        available = mount_manager.detect_available_engines()
-        if available[mount_engine]:
-            rprint(f"[green]✅ {engine} già installato[/green]")
+        if mount_manager.is_rclone_available():
+            rprint("[green]✅ rclone già installato[/green]")
             
             if configure:
-                rprint(f"[blue]⚙️ Configurazione {engine}...[/blue]")
-                if mount_manager.configure_engine(mount_engine):
-                    rprint(f"[green]✅ {engine} configurato[/green]")
+                rprint("[blue]⚙️ Configurazione rclone...[/blue]")
+                if mount_manager.configure_rclone():
+                    rprint("[green]✅ rclone configurato[/green]")
                 else:
-                    rprint(f"[red]❌ Errore configurazione {engine}[/red]")
+                    rprint("[red]❌ Errore configurazione rclone[/red]")
             return
         
         # Installazione
-        if mount_manager.install_engine(mount_engine):
-            rprint(f"[green]✅ {engine} installato con successo[/green]")
+        if mount_manager.install_rclone():
+            rprint("[green]✅ rclone installato con successo[/green]")
             
             # Configurazione automatica
             if configure:
-                rprint(f"[blue]⚙️ Configurazione {engine}...[/blue]")
-                if mount_manager.configure_engine(mount_engine):
-                    rprint(f"[green]✅ {engine} configurato[/green]")
+                rprint("[blue]⚙️ Configurazione rclone...[/blue]")
+                if mount_manager.configure_rclone():
+                    rprint("[green]✅ rclone configurato[/green]")
                 else:
-                    rprint(f"[yellow]⚠️ Avviso configurazione {engine}[/yellow]")
+                    rprint("[yellow]⚠️ Avviso configurazione rclone[/yellow]")
         else:
-            rprint(f"[red]❌ Installazione {engine} fallita[/red]")
+            rprint("[red]❌ Installazione rclone fallita[/red]")
             sys.exit(1)
             
     except Exception as e:

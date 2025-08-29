@@ -1,15 +1,14 @@
 #!/bin/bash
-# Test completo per nextcloud-wrapper v0.3.0
+# Test suite per nextcloud-wrapper v1.0.0 - rclone Engine (semplificato)
 
 set -e
 
-echo "🧪 Nextcloud Wrapper v0.3.0 - Test Suite"
-echo "=========================================="
+echo "🧪 Nextcloud Wrapper v1.0.0 - Test Suite Semplificata"
+echo "======================================================="
 
 # Configurazione test
 TEST_USER="test-user-$(date +%s)"
 TEST_PASSWORD="TestPass123!"
-TEST_QUOTA="1G"
 
 # Colori per output
 RED='\033[0;31m'
@@ -64,9 +63,9 @@ check_prerequisites() {
     log_success "Prerequisiti verificati"
 }
 
-# Test configurazione
+# Test configurazione v1.0
 test_config() {
-    log_info "Test configurazione..."
+    log_info "Test configurazione v1.0..."
     
     nextcloud-wrapper config
     
@@ -79,23 +78,24 @@ test_nextcloud_connectivity() {
     
     # Test tramite API wrapper
     python3 -c "
-from ncwrap.api import test_nextcloud_connectivity
-success, message = test_nextcloud_connectivity()
-print(f'Connettività: {message}')
-if not success:
+from ncwrap.api import test_webdav_connectivity
+if test_webdav_connectivity('$NC_ADMIN_USER', '$NC_ADMIN_PASS'):
+    print('✅ Connettività Nextcloud OK')
+else:
+    print('❌ Test connettività fallito')
     exit(1)
 "
     
     log_success "Connettività Nextcloud OK"
 }
 
-# Test creazione utente Nextcloud only
-test_create_nextcloud_user() {
-    log_info "Test creazione utente Nextcloud..."
+# Test creazione utente
+test_create_user() {
+    log_info "Test creazione utente..."
     
     nextcloud-wrapper user create "$TEST_USER" "$TEST_PASSWORD" --skip-linux
     
-    log_success "Utente Nextcloud creato"
+    log_success "Utente creato"
 }
 
 # Test login WebDAV
@@ -123,125 +123,41 @@ if success_count < len(results):
     log_success "Struttura cartelle verificata"
 }
 
-# Test quota (se sudo disponibile)
-test_quota() {
+# Test rclone (se sudo disponibile) 
+test_rclone_functionality() {
     if [[ "$SKIP_SUDO_TESTS" == "true" ]]; then
-        log_warning "Test quota saltato (no sudo)"
+        log_warning "Test rclone saltato (no sudo)"
         return
     fi
     
-    log_info "Test sistema quote..."
+    log_info "Test funzionalità rclone..."
     
-    # Test rilevamento filesystem
-    python3 -c "
-from ncwrap.quota import QuotaManager
-manager = QuotaManager()
-print(f'Filesystem rilevato: {manager.fs_type}')
-"
-    
-    # Test setup quota (senza effettivamente impostarla)
-    python3 -c "
-from ncwrap.quota import setup_quota_for_user
-from ncwrap.utils import parse_size_to_bytes, bytes_to_human
-
-# Calcola quota filesystem
-nc_bytes = parse_size_to_bytes('$TEST_QUOTA')
-fs_bytes = int(nc_bytes * 0.02)
-fs_quota = bytes_to_human(fs_bytes)
-
-print(f'Quota calcolata: NC $TEST_QUOTA → FS {fs_quota} (2%)')
-"
-    
-    log_success "Test quota completato"
-}
-
-# Test WebDAV mount (se sudo disponibile)
-test_webdav_mount() {
-    if [[ "$SKIP_SUDO_TESTS" == "true" ]]; then
-        log_warning "Test WebDAV mount saltato (no sudo)"
+    # Verifica rclone disponibile
+    if ! command -v rclone &> /dev/null; then
+        log_warning "rclone non installato - test saltato"
         return
     fi
     
-    log_info "Test WebDAV mount..."
-    
-    # Verifica che davfs2 sia installato
-    if ! command -v mount.davfs &> /dev/null; then
-        log_warning "davfs2 non installato - test mount saltato"
-        return
-    fi
-    
-    # Test configurazione WebDAV
+    # Test mount manager
     python3 -c "
-from ncwrap.webdav import WebDAVMountManager
-manager = WebDAVMountManager()
-print('WebDAV manager inizializzato')
+from ncwrap.mount import MountManager
+manager = MountManager()
+print(f'rclone disponibile: {manager.is_rclone_available()}')
 
 # Test setup credenziali (dry run)
-from ncwrap.api import get_webdav_url
-webdav_url = get_webdav_url('$TEST_USER')
-print(f'URL WebDAV: {webdav_url}')
+from ncwrap.api import get_nc_config
+base_url, _, _ = get_nc_config()
+print(f'URL base Nextcloud: {base_url}')
+
+# Test profili
+from ncwrap.rclone import MOUNT_PROFILES
+print(f'Profili disponibili: {list(MOUNT_PROFILES.keys())}')
 "
     
-    log_success "Test WebDAV mount completato"
+    log_success "Test rclone completato"
 }
 
-# Test servizi systemd (se sudo disponibile)
-test_systemd_services() {
-    if [[ "$SKIP_SUDO_TESTS" == "true" ]]; then
-        log_warning "Test servizi systemd saltato (no sudo)"
-        return
-    fi
-    
-    log_info "Test servizi systemd..."
-    
-    python3 -c "
-from ncwrap.systemd import SystemdManager
-manager = SystemdManager()
-
-# Lista servizi esistenti
-services = manager.list_nextcloud_services()
-print(f'Servizi nextcloud trovati: {len(services)}')
-
-# Test generazione configurazione servizio
-config = manager._generate_webdav_mount_service_config(
-    'test-service', '$TEST_USER', 'https://example.com/dav/', '/home/test', 1000, 1000
-)
-print('Configurazione servizio generata OK')
-"
-    
-    log_success "Test servizi systemd completato"
-}
-
-# Test API completa
-test_api_features() {
-    log_info "Test funzionalità API..."
-    
-    python3 -c "
-from ncwrap.api import *
-
-# Test info utente
-info = get_user_info('$TEST_USER')
-if info:
-    print('Info utente recuperate OK')
-else:
-    print('Utente non trovato (normale se appena creato)')
-
-# Test lista directory
-status, xml = list_webdav_directory('$TEST_USER', '$TEST_PASSWORD')
-print(f'Lista directory: status {status}')
-
-# Test spazio WebDAV
-space_info = get_webdav_space_info('$TEST_USER', '$TEST_PASSWORD')
-if space_info:
-    print(f'Spazio WebDAV: {space_info}')
-else:
-    print('Info spazio non disponibile')
-"
-    
-    log_success "Test API completato"
-}
-
-# Test virtual environment (se disponibile)
+# Test virtual environment
 test_virtual_environment() {
     log_info "Test virtual environment..."
     
@@ -253,51 +169,39 @@ print(f'Conda disponibile: {manager.is_conda_available()}')
 if manager.is_conda_available():
     conda_info = manager.conda_info
     print(f'Conda version: {conda_info[\"version\"]}')
-    print(f'Conda path: {conda_info[\"executable\"]}')
     
     env_name = manager.config[\"venv_name\"]
     if manager.environment_exists(env_name):
         print(f'Environment {env_name}: ✅ Esistente')
-        env_info = manager.get_env_info(env_name)
-        if env_info:
-            print(f'Python path: {env_info[\"python_path\"]}')
-            print(f'Packages: {len(env_info[\"packages\"])}')
     else:
         print(f'Environment {env_name}: ❌ Non trovato')
-    
-    # Test path SystemD
-    systemd_path = manager.get_systemd_executable_path()
-    print(f'SystemD path: {systemd_path}')
 else:
     print('Conda non disponibile - usando Python di sistema')
 "
     
     log_success "Test virtual environment completato"
 }
+
+# Test utilities semplificati
 test_utilities() {
     log_info "Test moduli utilities..."
     
     python3 -c "
 from ncwrap.utils import *
 
-# Test parsing size
-size_bytes = parse_size_to_bytes('1G')
-size_human = bytes_to_human(size_bytes)
-print(f'Parsing size: 1G = {size_bytes} bytes = {size_human}')
-
-# Test validazione dominio
-valid = validate_domain('test.com')
-print(f'Validazione dominio test.com: {valid}')
-
-# Test validazione password
-valid, msg = validate_password('$TEST_PASSWORD')
-print(f'Validazione password: {valid} - {msg}')
-
 # Test info sistema
 info = get_system_info()
 print(f'OS: {info.get(\"os\", \"unknown\")}')
-print(f'Kernel: {info.get(\"kernel\", \"unknown\")}')
-print(f'Memory: {info.get(\"memory\", \"unknown\")}')
+
+# Test mount check
+print(f'Mount check function available: {callable(is_mounted)}')
+
+# Test run command
+try:
+    result = run(['echo', 'test'])
+    print(f'Run command OK: {\"test\" in result}')
+except:
+    print('Run command failed')
 "
     
     log_success "Test utilities completato"
@@ -317,24 +221,60 @@ test_password_change() {
     
     log_success "Cambio password verificato"
     
-    # Ripristina password originale per altri test
+    # Ripristina password originale
     nextcloud-wrapper user passwd "$TEST_USER" "$TEST_PASSWORD" --nc-only
 }
 
-# Test info utente
+# Test info utente v1.0
 test_user_info() {
-    log_info "Test info utente..."
+    log_info "Test info utente v1.0..."
     
     nextcloud-wrapper user info "$TEST_USER"
     
     log_success "Info utente recuperate"
 }
 
+# Test CLI mount (se rclone disponibile)
+test_cli_mount() {
+    if [[ "$SKIP_SUDO_TESTS" == "true" ]]; then
+        log_warning "Test CLI mount saltato (no sudo)"
+        return
+    fi
+    
+    log_info "Test CLI mount..."
+    
+    # Test lista profili
+    nextcloud-wrapper mount profiles
+    
+    # Test mount temporaneo (se rclone disponibile)
+    if command -v rclone &> /dev/null; then
+        log_info "Rclone disponibile, test mount temporaneo..."
+        nextcloud-wrapper mount test "$TEST_USER" "$TEST_PASSWORD" --profile=minimal
+    else
+        log_warning "Rclone non disponibile, test mount saltato"
+    fi
+    
+    log_success "Test CLI mount completato"
+}
+
+# Test setup command v1.0
+test_setup_command() {
+    log_info "Test comando setup v1.0..."
+    
+    # Test mostra profili
+    nextcloud-wrapper setup profiles
+    
+    # Test migrazione info
+    nextcloud-wrapper setup migrate
+    
+    log_success "Test setup completato"
+}
+
 # Cleanup test
 cleanup_test() {
     log_info "Pulizia test..."
     
-    # Elimina utente Nextcloud (se possibile)
+    # Elimina utente Nextcloud
     python3 -c "
 try:
     from ncwrap.api import delete_nc_user
@@ -347,10 +287,10 @@ except Exception as e:
     log_success "Cleanup completato"
 }
 
-# Esecuzione test suite
+# Esecuzione test suite v1.0
 main() {
     echo
-    echo "🏁 Inizio test suite..."
+    echo "🏁 Inizio test suite v1.0..."
     echo
     
     # Parse arguments
@@ -371,38 +311,42 @@ main() {
         esac
     done
     
-    # Esegui test
+    # Test core v1.0 (solo rclone)
     check_prerequisites
     test_config
     test_nextcloud_connectivity
     test_virtual_environment
     test_utilities
-    test_create_nextcloud_user
+    test_create_user
     test_webdav_login
     test_folder_structure
-    test_api_features
     test_password_change
     test_user_info
+    test_setup_command
     
     # Test avanzati (se non quick mode)
     if [[ "$QUICK_TEST" != "true" ]]; then
-        test_quota
-        test_webdav_mount
-        test_systemd_services
+        test_rclone_functionality
+        test_cli_mount
     fi
     
     cleanup_test
     
     echo
-    log_success "🎉 Tutti i test completati con successo!"
+    log_success "🎉 Tutti i test v1.0 completati con successo!"
     echo
-    echo "✨ Nextcloud Wrapper v0.3.0 funziona correttamente!"
+    echo "✨ Nextcloud Wrapper v1.0.0 funziona correttamente!"
     echo
-    echo "🚀 Prossimi passi:"
-    echo "   1. Configura le variabili in .env"
-    echo "   2. Testa con utenti reali: nextcloud-wrapper setup user domain.com password"
-    echo "   3. Configura mount automatici: nextcloud-wrapper webdav mount user password"
-    echo "   4. Monitora quote: nextcloud-wrapper quota show"
+    echo "🚀 Versione 1.0 - Caratteristiche:"
+    echo "   • Engine unico: rclone (performance ottimali)"
+    echo "   • Gestione spazio: automatica via rclone (cache LRU)"
+    echo "   • Setup semplificato: zero configurazioni quote"
+    echo "   • 4 profili rclone: hosting, minimal, writes, full"
+    echo
+    echo "🔧 Workflow semplificato:"
+    echo "   1. nextcloud-wrapper setup user domain.com password --profile=full"
+    echo "   2. nextcloud-wrapper mount status"
+    echo "   3. ssh utente@server (home = spazio Nextcloud!)"
     echo
 }
 
