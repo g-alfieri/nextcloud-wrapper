@@ -17,10 +17,7 @@ try:
 except ImportError:
     user_app = None
 
-try:
-    from .cli_webdav import webdav_app
-except ImportError:
-    webdav_app = None
+
 
 try:
     from .cli_mount import mount_app
@@ -79,8 +76,7 @@ if user_app:
     app.add_typer(user_app, name="user")
 if mount_app:
     app.add_typer(mount_app, name="mount")
-if webdav_app:
-    app.add_typer(webdav_app, name="webdav")
+
 if quota_app:
     app.add_typer(quota_app, name="quota")
 if service_app:
@@ -184,8 +180,8 @@ def status():
     
     # Status servizi
     try:
-        from .systemd import list_all_webdav_services
-        all_services = list_all_webdav_services()
+        from .systemd import list_all_mount_services
+        all_services = list_all_mount_services()
         system_count = len(all_services.get("system", []))
         user_count = len(all_services.get("user", []))
         rprint(f"[bold]Servizi systemd:[/bold] {system_count} system, {user_count} user")

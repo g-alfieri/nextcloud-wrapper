@@ -30,54 +30,7 @@ class SystemdManager:
             "timeout": int(os.environ.get("NC_SERVICE_TIMEOUT", "60"))
         }
     
-    def create_webdav_mount_service(self, username: str, password: str, 
-                                   mount_point: str = None) -> str:
-        """
-        Crea servizio systemd per mount WebDAV automatico
-        
-        Args:
-            username: Nome utente
-            password: Password
-            mount_point: Directory di mount (default: /home/username)
-            
-        Returns:
-            Nome del servizio creato
-        """
-        if not mount_point:
-            mount_point = f"/home/{username}"
-        
-        service_name = f"webdav-home-{username}"
-        
-        # Prepara credenziali WebDAV
-        from .api import get_nc_config
-        base_url, _, _ = get_nc_config()
-        webdav_url = f"{base_url}/remote.php/dav/files/{username}/"
-        
-        # Setup credenziali davfs2
-        from .webdav import WebDAVMountManager
-        webdav_manager = WebDAVMountManager()
-        webdav_manager.setup_user_credentials(username, password, webdav_url)
-        
-        # Ottieni UID/GID utente
-        from .utils import get_user_uid_gid
-        uid, gid = get_user_uid_gid(username)
-        
-        service_content = self._generate_webdav_mount_service_config(
-            service_name, username, webdav_url, mount_point, uid, gid
-        )
-        
-        # Scrivi file servizio
-        service_file = self.system_dir / f"{service_name}.service"
-        if atomic_write(str(service_file), service_content, 0o644):
-            # Reload systemd
-            self._reload_systemd()
-            print(f"✅ Servizio WebDAV creato: {service_name}")
-            return service_name
-        else:
-            raise RuntimeError(f"Errore creazione file servizio: {service_file}")
-    
 
-    
     def create_sync_service(self, username: str, source: str, dest: str,
                            schedule: str = "hourly", user: bool = False) -> str:
         """
@@ -325,40 +278,7 @@ class SystemdManager:
             print(f"Errore setup ambiente systemd per {username}: {e}")
             return False
     
-    def _generate_webdav_mount_service_config(self, service_name: str, username: str, 
-                                             webdav_url: str, mount_point: str, 
-                                             uid: int, gid: int) -> str:
-        """Genera configurazione servizio mount WebDAV"""
-        
-        # Ottieni path Python dal virtual environment se disponibile
-        try:
-            from .venv import get_venv_executable_path
-            exec_path = get_venv_executable_path()
-        except ImportError:
-            exec_path = "/usr/bin/nextcloud-wrapper"
-        
-        return f"""[Unit]
-Description=WebDAV mount for {username} home directory
-After=network-online.target
-Wants=network-online.target
-Before=systemd-user-sessions.service
 
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-User=root
-Group=root
-ExecStartPre=/bin/mkdir -p {mount_point}
-ExecStartPre=/bin/bash -c 'if mountpoint -q {mount_point}; then echo "Already mounted: {mount_point}"; exit 0; fi'
-ExecStart=/bin/mount -t davfs {webdav_url} {mount_point} -o uid={uid},gid={gid},rw,user,noauto
-ExecStop=/bin/bash -c 'if mountpoint -q {mount_point}; then /bin/umount {mount_point}; fi'
-TimeoutSec={self.config['timeout']}
-Restart=no
-
-[Install]
-WantedBy=multi-user.target
-"""
-    
 
     
     def _generate_sync_service_config(self, source: str, dest: str, username: str) -> str:
@@ -589,10 +509,18 @@ WantedBy=multi-user.target
 
 
 # Funzioni di convenienza per backward compatibility
-def create_mount_service(username: str, remote_name: str, mount_point: str) -> str:
-    """Crea servizio mount automatico"""
+def create_mount_service(username: str, mount_point: str, engine: str = "rclone", profile: str = "writes") -> str:
+    """Crea servizio mount automatico con engine unificato"""
+    from .mount import MountManager, MountEngine
+    
     manager = SystemdManager()
-    return manager.create_webdav_mount_service(username, "password_placeholder", mount_point)
+    mount_manager = MountManager()
+    mount_engine = MountEngine(engine.lower())
+    
+    # Nota: password deve essere fornita separatamente per sicurezza
+    # Questo è un wrapper per compatibilità - usa mount_manager direttamente
+    print(f"⚠️ Usa MountManager.create_mount_service() per implementazione completa")
+    return f"ncwrap-{engine}-{username}"
 
 
 def enable_service(service: str, user: bool = False) -> bool:
@@ -607,8 +535,8 @@ def disable_service(service: str, user: bool = False) -> bool:
     return manager.disable_service(service, user)
 
 
-def list_all_webdav_services() -> Dict[str, List[Dict]]:
-    """Recupera tutti i servizi nextcloud (system + user)"""
+def list_all_mount_services() -> Dict[str, List[Dict]]:
+    """Recupera tutti i servizi nextcloud mount (system + user)"""
     manager = SystemdManager()
     
     return {
@@ -696,4 +624,4 @@ def auto_repair_services() -> Dict:
 
 
 # Alias aggiuntivi per compatibilità
-get_all_nextcloud_services = list_all_webdav_services
+get_all_mount_services = list_all_mount_services

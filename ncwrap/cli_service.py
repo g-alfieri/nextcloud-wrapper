@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import print as rprint
 
-from .systemd import SystemdManager, list_all_webdav_services
+from .systemd import SystemdManager, list_all_mount_services
 from .utils import check_sudo_privileges
 
 service_app = typer.Typer(help="Gestione servizi systemd")
@@ -19,7 +19,7 @@ def list_services():
     """Lista tutti i servizi nextcloud-wrapper"""
     rprint("[blue]⚙️ Servizi nextcloud-wrapper[/blue]")
     
-    all_services = list_all_webdav_services()
+    all_services = list_all_mount_services()
     
     # Servizi system
     system_services = all_services.get("system", [])
@@ -280,29 +280,40 @@ def show_service_logs(
 
 
 @service_app.command("create")
-def create_webdav_service(
+def create_mount_service(
     username: str = typer.Argument(help="Nome utente"),
     password: str = typer.Argument(help="Password"),
     mount_point: str = typer.Option(None, help="Directory mount (default: /home/username)"),
+    engine: str = typer.Option("rclone", "--engine", help="Engine mount (rclone/davfs2)"),
+    profile: str = typer.Option("writes", "--profile", help="Profilo mount (solo rclone)"),
     enable: bool = typer.Option(True, "--enable/--no-enable", help="Abilita automaticamente")
 ):
-    """Crea servizio WebDAV mount per utente"""
+    """Crea servizio mount per utente con engine unificato"""
     if not mount_point:
         mount_point = f"/home/{username}"
     
-    rprint(f"[blue]⚙️ Creando servizio WebDAV per {username}[/blue]")
+    rprint(f"[blue]⚙️ Creando servizio mount {engine} per {username}[/blue]")
     
     if not check_sudo_privileges():
         rprint("[red]❌ Privilegi sudo richiesti[/red]")
         sys.exit(1)
     
     try:
-        systemd_manager = SystemdManager()
-        service_name = systemd_manager.create_webdav_mount_service(username, password, mount_point)
+        from .mount import MountEngine, MountManager
+        mount_engine = MountEngine(engine.lower())
+        mount_manager = MountManager()
+        
+        # Crea servizio tramite mount manager
+        service_name = mount_manager.create_mount_service(
+            username, password, mount_point, mount_engine, 
+            profile if mount_engine == MountEngine.RCLONE else None
+        )
         
         rprint(f"[green]✅ Servizio creato: {service_name}[/green]")
+        rprint(f"[cyan]Engine: {engine} | Mount: {mount_point}[/cyan]")
         
         if enable:
+            systemd_manager = SystemdManager()
             if systemd_manager.enable_service(service_name):
                 rprint(f"[green]✅ Servizio abilitato e avviato[/green]")
             else:
