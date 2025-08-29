@@ -196,13 +196,13 @@ class SystemdManager:
             cmd = ["systemctl"]
             if user:
                 cmd.append("--user")
-            cmd.extend(["list-units", "--all", "nextcloud-*", "webdav-*", "--no-pager", "--no-legend"])
+            cmd.extend(["list-units", "--type", "service", "--no-pager", "--no-legend"])
             
             output = run(cmd, check=False)
             services = []
             
             for line in output.split('\n'):
-                if line.strip() and ("nextcloud-" in line or "webdav-" in line):
+                if line.strip() and ("nc-" in line):
                     parts = line.split()
                     if len(parts) >= 4:
                         services.append({
