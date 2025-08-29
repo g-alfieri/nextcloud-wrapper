@@ -218,16 +218,16 @@ class MountManager:
             
             # Backup home esistente
             backup_path = self._backup_existing_home(home_path, username)
-            uid, gid = get_user_uid_gid(username)
-            user_permissions = [
-                "--uid", str(uid),
-                "--gid", str(gid), 
-                "--umask", "0022",
-                "--file-perms", "0644",
-                "--dir-perms", "0755"
-            ]
+            # uid, gid = get_user_uid_gid(username)
+            # user_permissions = [
+            #     "--uid", str(uid),
+            #     "--gid", str(gid), 
+            #     "--umask", "0022",
+            #     "--file-perms", "0644",
+            #     "--dir-perms", "0755"
+            # ]
             # Mount con rclone - Configurazione più robusta
-            if mount_remote(remote_name, home_path, background=True, profile=profile, custom_options=user_permissions):
+            if mount_remote(remote_name, home_path, background=True, profile=profile):
                 # Verifica che il mount sia effettivamente attivo
                 import time
                 time.sleep(3)  # Attendi che rclone si stabilizzi
@@ -433,16 +433,18 @@ class MountManager:
             # Leggi da systemd se è un servizio
             services = run(["systemctl", "list-units", "--type=service", "--state=active"], check=False)
             for line in services.split('\n'):
-                if f"rclone" in line and mount_point.replace("/", "-") in line:
+                if f"rclone" in line and mount_point.replace("/", "/") in line:
                     # Questo è approssimativo, potremmo migliorare
-                    if "writes" in line:
+                    if "full" in line:
+                        return "full"
+                    elif "writes" in line:
                         return "writes"
                     elif "minimal" in line:
                         return "minimal"
                     elif "hosting" in line:
                         return "hosting"
             
-            return "writes"  # Default
+            return "cannot detect"  # Default
         except:
             return None
     

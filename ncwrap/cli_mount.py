@@ -260,7 +260,9 @@ def mount_status(
 
 @mount_app.command("info")
 def mount_info(
-    mount_point: str = typer.Argument(help="Directory mount da analizzare")
+    mount_point: str = typer.Argument(help="Directory mount da analizzare"),
+    check_space: bool = typer.Option(False, "--check-space", help="Calcola spazio occupato")
+
 ):
     """Informazioni dettagliate su un mount specifico"""
     rprint(f"[blue]🔍 Informazioni mount: {mount_point}[/blue]")
@@ -288,7 +290,8 @@ def mount_info(
     
     # Informazioni spazio
     try:
-        if is_mounted(mount_point):
+        if is_mounted(mount_point) and check_space:
+            rprint(f"\n[yellow]Calcolo spazio occupato (...)[/yellow]")
             used_space = get_directory_size(mount_point)
             rprint(f"\n[bold]💾 Utilizzo spazio:[/bold]")
             rprint(f"• Spazio utilizzato: {bytes_to_human(used_space)}")
@@ -300,7 +303,7 @@ def mount_info(
 def migrate_mount(
     mount_point: str = typer.Argument(help="Mount point da migrare"),
     target_engine: str = typer.Argument(help="Engine target (rclone/davfs2)"),
-    profile: str = typer.Option("writes", help="Profilo per rclone"),
+    profile: str = typer.Option("full", help="Profilo per rclone"),
     backup: bool = typer.Option(True, "--backup/--no-backup", help="Backup configurazione")
 ):
     """Migra un mount esistente ad un altro engine"""
@@ -326,11 +329,11 @@ def migrate_mount(
         sys.exit(1)
     
     current_engine = status.get("engine")
-    if current_engine == target:
-        rprint(f"[yellow]⚠️ Mount già usa {target_engine}[/yellow]")
+    if current_engine == target and status.get("profile") == profile:
+        rprint(f"[yellow]⚠️ Mount già usa {target_engine} e profilo {profile}[/yellow]")
         return
     
-    rprint(f"[cyan]Migrazione: {current_engine.value if hasattr(current_engine, 'value') else current_engine} → {target_engine}[/cyan]")
+    rprint(f"[cyan]Migrazione: {current_engine.value if hasattr(current_engine, 'value') else current_engine} → {target_engine} con profilo {profile}[/cyan]")
     
     # Conferma
     if not Confirm.ask("Continuare con la migrazione?"):
