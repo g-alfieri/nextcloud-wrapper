@@ -1,6 +1,6 @@
 """
 CLI Mount - Gestione mount rclone (v1.0 semplificato)
-Solo rclone engine con 4 profili
+Solo rclone engine con 4 profili + gestione servizi integrata
 """
 import typer
 import sys
@@ -16,9 +16,14 @@ from .mount import MountManager, setup_user_with_mount
 from .utils import check_sudo_privileges, is_mounted, bytes_to_human, get_directory_size
 from .api import test_webdav_connectivity
 from .rclone import MOUNT_PROFILES, check_connectivity
+from .systemd import SystemdManager, list_all_mount_services
 
-mount_app = typer.Typer(help="Gestione mount rclone (engine unico)")
+mount_app = typer.Typer(help="Gestione mount rclone (engine unico) + servizi")
 console = Console()
+
+# Sub-app per servizi systemd
+service_app = typer.Typer(help="Gestione servizi systemd")
+mount_app.add_typer(service_app, name="service")
 
 
 @mount_app.command("profiles") 
@@ -459,6 +464,208 @@ def install_rclone(
     except Exception as e:
         rprint(f"[red]❌ Errore: {e}[/red]")
         sys.exit(1)
+
+
+# ===== COMANDI SERVIZIO INTEGRATI =====
+
+@service_app.command("list")
+def list_services():
+    """Lista tutti i servizi nextcloud-wrapper"""
+    rprint("[blue]⚙️ Servizi nextcloud-wrapper[/blue]")
+    
+    all_services = list_all_mount_services()
+    
+    # Servizi system
+    system_services = all_services.get("system", [])
+    if system_services:
+        table = Table(title="Servizi System")
+        table.add_column("Nome", style="cyan")
+        table.add_column("Load", style="white")
+        table.add_column("Active", style="green")
+        table.add_column("Sub", style="yellow")
+        table.add_column("Descrizione", style="blue")
+        
+        for service in system_services:
+            table.add_row(
+                service["name"],
+                service["load"],
+                service["active"],
+                service["sub"],
+                service["description"]
+            )
+        console.print(table)
+    
+    # Servizi user
+    user_services = all_services.get("user", [])
+    if user_services:
+        table = Table(title="Servizi User")
+        table.add_column("Nome", style="cyan")
+        table.add_column("Load", style="white")
+        table.add_column("Active", style="green")
+        table.add_column("Sub", style="yellow")
+        table.add_column("Descrizione", style="blue")
+        
+        for service in user_services:
+            table.add_row(
+                service["name"],
+                service["load"],
+                service["active"],
+                service["sub"],
+                service["description"]
+            )
+        console.print(table)
+    
+    if not system_services and not user_services:
+        rprint("[yellow]Nessun servizio nextcloud-wrapper trovato[/yellow]")
+        rprint("💡 Crea servizi con: nextcloud-wrapper mount mount --service")
+
+
+@service_app.command("status")
+def service_status(
+    service_name: str = typer.Argument(help="Nome servizio"),
+    user: bool = typer.Option(False, "--user", help="Servizio utente")
+):
+    """Mostra status dettagliato di un servizio"""
+    rprint(f"[blue]📊 Status servizio: {service_name}[/blue]")
+    
+    try:
+        systemd_manager = SystemdManager()
+        status = systemd_manager.get_service_status(service_name, user)
+        
+        if status:
+            table = Table(title=f"Status {service_name}")
+            table.add_column("Campo", style="cyan")
+            table.add_column("Valore", style="white")
+            
+            for key, value in status.items():
+                display_key = key.replace("_", " ").title()
+                table.add_row(display_key, str(value or "N/A"))
+            
+            console.print(table)
+        else:
+            rprint(f"[red]❌ Servizio {service_name} non trovato[/red]")
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore: {e}[/red]")
+
+
+@service_app.command("enable")
+def enable_service(
+    service_name: str = typer.Argument(help="Nome servizio"),
+    user: bool = typer.Option(False, "--user", help="Servizio utente")
+):
+    """Abilita e avvia un servizio"""
+    rprint(f"[blue]▶️ Abilitando servizio: {service_name}[/blue]")
+    
+    if not user and not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti per servizi system[/red]")
+        sys.exit(1)
+    
+    try:
+        # Usa direttamente systemctl invece del wrapper
+        from .utils import run
+        cmd = ["systemctl"]
+        if user:
+            cmd.append("--user")
+        cmd.extend(["enable", "--now", f"{service_name}.service"])
+        
+        result = run(cmd, check=False)
+        if "No such file or directory" not in str(result):
+            rprint(f"[green]✅ Servizio {service_name} abilitato e avviato[/green]")
+        else:
+            rprint(f"[red]❌ Servizio {service_name} non trovato[/red]")
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore: {e}[/red]")
+
+
+@service_app.command("disable")
+def disable_service(
+    service_name: str = typer.Argument(help="Nome servizio"),
+    user: bool = typer.Option(False, "--user", help="Servizio utente")
+):
+    """Disabilita e ferma un servizio"""
+    rprint(f"[blue]⏹️ Disabilitando servizio: {service_name}[/blue]")
+    
+    if not user and not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti per servizi system[/red]")
+        sys.exit(1)
+    
+    try:
+        # Usa direttamente systemctl
+        from .utils import run
+        cmd = ["systemctl"]
+        if user:
+            cmd.append("--user")
+        cmd.extend(["disable", "--now", f"{service_name}.service"])
+        
+        result = run(cmd, check=False)
+        rprint(f"[green]✅ Servizio {service_name} disabilitato e fermato[/green]")
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore: {e}[/red]")
+
+
+@service_app.command("restart")
+def restart_service(
+    service_name: str = typer.Argument(help="Nome servizio"),
+    user: bool = typer.Option(False, "--user", help="Servizio utente")
+):
+    """Riavvia un servizio"""
+    rprint(f"[blue]🔄 Riavviando servizio: {service_name}[/blue]")
+    
+    if not user and not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti per servizi system[/red]")
+        sys.exit(1)
+    
+    try:
+        # Usa direttamente systemctl
+        from .utils import run
+        cmd = ["systemctl"]
+        if user:
+            cmd.append("--user")
+        cmd.extend(["restart", f"{service_name}.service"])
+        
+        result = run(cmd, check=False)
+        rprint(f"[green]✅ Servizio {service_name} riavviato[/green]")
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore: {e}[/red]")
+
+
+@service_app.command("logs")
+def show_service_logs(
+    service_name: str = typer.Argument(help="Nome servizio"),
+    user: bool = typer.Option(False, "--user", help="Servizio utente"),
+    lines: int = typer.Option(50, "--lines", help="Numero righe da mostrare"),
+    follow: bool = typer.Option(False, "--follow", help="Segui log in tempo reale")
+):
+    """Mostra log di un servizio"""
+    rprint(f"[blue]📋 Log servizio: {service_name}[/blue]")
+    
+    try:
+        from .utils import run
+        
+        cmd = ["journalctl"]
+        if user:
+            cmd.append("--user")
+        
+        cmd.extend(["-u", f"{service_name}.service"])
+        cmd.extend(["-n", str(lines)])
+        cmd.append("--no-pager")
+        
+        if follow:
+            cmd.append("-f")
+        
+        output = run(cmd, check=False)
+        
+        if output:
+            rprint(output)
+        else:
+            rprint("[yellow]Nessun log trovato[/yellow]")
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore lettura log: {e}[/red]")
 
 
 if __name__ == "__main__":
