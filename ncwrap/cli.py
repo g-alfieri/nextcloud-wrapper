@@ -17,8 +17,6 @@ try:
 except ImportError:
     user_app = None
 
-
-
 try:
     from .cli_mount import mount_app
 except ImportError:
@@ -27,10 +25,8 @@ except ImportError:
 # quota_app rimosso in v1.0.0 (gestione spazio automatica rclone)
 quota_app = None
 
-try:
-    from .cli_service import service_app
-except ImportError:
-    service_app = None
+# ✅ cli_service rimosso - funzionalità integrate in mount_app
+# service_app = None
 
 try:
     from .cli_venv import venv_app
@@ -75,9 +71,9 @@ if user_app:
 if mount_app:
     app.add_typer(mount_app, name="mount")
 
+# ✅ service command rimosso - funzionalità integrate in mount
 # quota command rimosso in v1.0.0
-if service_app:
-    app.add_typer(service_app, name="service")
+
 if venv_app:
     app.add_typer(venv_app, name="venv")
 
@@ -168,13 +164,14 @@ def status():
     except Exception:
         rprint("[bold]Mount rclone:[/bold] ⚠️ Non rilevato")
     
-    # Status servizi
+    # Status servizi - ora gestiti da MountManager direttamente
     try:
         from .systemd import list_all_mount_services
         all_services = list_all_mount_services()
         system_count = len(all_services.get("system", []))
         user_count = len(all_services.get("user", []))
         rprint(f"[bold]Servizi systemd:[/bold] {system_count} system, {user_count} user")
+        rprint("  💡 Usa 'nextcloud-wrapper mount service --help' per gestire i servizi")
     except Exception:
         rprint("[bold]Servizi systemd:[/bold] ⚠️ Non rilevato")
     
