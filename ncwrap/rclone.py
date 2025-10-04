@@ -200,7 +200,23 @@ def mount_remote(remote_name: str, mount_point: str, background: bool = True,
     """
     ensure_config()
     ensure_dir(mount_point)
+        # ✅ CONTROLLO SE GIÀ MONTATO
+    if is_mounted(mount_point):
+        print(f"⚠️ {mount_point} già montato")
+        print("💡 Smonta prima con: nextcloud-wrapper mount stop {mount_point}")
+        return False
     
+    # ✅ CONTROLLA CHE LA DIRECTORY SIA VUOTA (per daemon)
+    if background:
+        try:
+            contents = os.listdir(mount_point)
+            if contents:
+                print(f"⚠️ Directory non vuota: {mount_point}")
+                print(f"Contenuti: {contents[:3]}...")
+                return False
+        except:
+            pass
+
     cmd = [
         "rclone", "mount", f"{remote_name}:/", mount_point,
         "--config", str(RCLONE_CONF)
@@ -444,7 +460,7 @@ def estimate_storage_usage(profile: str, files_accessed_daily: int = 100,
         return "Sconosciuto"
 
 
-def create_systemd_mount_service(service_name: str, username: str, 
+def create_systemd_mount_service(username: str, 
                                 profile: str = "full") -> str:
     """
     Genera servizio systemd che delega tutto al CLI esistente

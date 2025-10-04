@@ -251,7 +251,7 @@ class MountManager:
         
         # Usa il generatore rclone
         service_content = create_systemd_mount_service(
-            service_name, remote_name, home_path, "root", profile or "full"
+            username, profile or "full"
         )
         
         # Scrivi file servizio

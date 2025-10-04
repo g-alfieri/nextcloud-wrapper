@@ -13,7 +13,7 @@ from rich import print as rprint
 from rich.prompt import Prompt, Confirm
 
 from .mount import MountManager, setup_user_with_mount
-from .utils import check_sudo_privileges, is_mounted, bytes_to_human, get_directory_size
+from .utils import check_sudo_privileges, is_mounted, bytes_to_human, get_directory_size, is_command_available
 from .api import test_webdav_connectivity
 from .rclone import MOUNT_PROFILES, check_connectivity
 from .systemd import SystemdManager, list_all_mount_services
@@ -70,13 +70,13 @@ def mount_user(
     try:
         mount_manager = MountManager()
         
-        # Installa rclone se necessario
-        if not mount_manager.is_rclone_available():
-            rprint("[yellow]⚠️ rclone non trovato[/yellow]")
+        if not is_command_available("rclone"):
+            rprint("[yellow]⚠️ rclone non disponibile[/yellow]")
             
             install = Confirm.ask("Installare rclone?")
             if install:
-                if not mount_manager.install_rclone():
+                mount_manager = MountManager()
+                if not mount_manager._install_rclone():
                     rprint("[red]❌ Installazione rclone fallita[/red]")
                     sys.exit(1)
             else:
@@ -122,7 +122,7 @@ def mount_user(
             if auto_service:
                 try:
                     service_name = mount_manager.create_systemd_service(
-                        username, password, mount_point, profile
+                        username, profile
                     )
                     
                     # Abilita servizio
@@ -706,6 +706,121 @@ def show_service_logs(
             
     except Exception as e:
         rprint(f"[red]❌ Errore lettura log: {e}[/red]")
+@service_app.command("recreate")
+def recreate_service(
+    username: str = typer.Argument(help="Nome utente per ricreare servizio"),
+    password: str = typer.Option(None, help="Password utente (se non fornita, richiesta)"),
+    profile: str = typer.Option("full", help="Profilo mount (hosting/minimal/writes/full)"),
+    force: bool = typer.Option(False, "--force", help="Forza ricreazione anche se esiste")
+):
+    """Ricrea servizio systemd per utente esistente"""
+    
+    # Valida profilo
+    if profile not in MOUNT_PROFILES:
+        rprint(f"[red]❌ Profilo non valido: {profile}[/red]")
+        rprint(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
+        sys.exit(1)
+    
+    rprint(f"[blue]🔄 Ricreazione servizio per utente: {username}[/blue]")
+    rprint(f"Profilo: {profile} ({MOUNT_PROFILES[profile]['description']})")
+    
+    if not check_sudo_privileges():
+        rprint("[red]❌ Privilegi sudo richiesti[/red]")
+        sys.exit(1)
+    
+    # Richiedi password se non fornita
+    if not password:
+        password = Prompt.ask(f"Password per {username}", password=True)
+    
+    try:
+        service_name = f"ncwrap-rclone-{username}"
+        remote_name = f"nc-{username}"
+        home_path = f"/home/{username}"
+        
+        # Verifica se servizio esiste già
+        try:
+            from .utils import run
+            check_result = run(["systemctl", "status", f"{service_name}.service"], check=False)
+            service_exists = "could not be found" not in check_result
+        except:
+            service_exists = False
+        
+        if service_exists and not force:
+            rprint(f"[yellow]⚠️ Servizio {service_name} già esiste[/yellow]")
+            if not Confirm.ask("Ricreare comunque?"):
+                rprint("[cyan]Operazione annullata[/cyan]")
+                return
+        
+        # Test connettività prima di procedere
+        rprint("[blue]🔍 Test connettività WebDAV...[/blue]")
+        if not test_webdav_connectivity(username, password):
+            rprint("[red]❌ Test connettività WebDAV fallito[/red]")
+            rprint("💡 Verifica credenziali e configurazione")
+            sys.exit(1)
+        
+        # Ferma servizio esistente se attivo
+        if service_exists:
+            rprint(f"[blue]⏹️ Fermo servizio esistente: {service_name}[/blue]")
+            try:
+                run(["systemctl", "stop", f"{service_name}.service"], check=False)
+                run(["systemctl", "disable", f"{service_name}.service"], check=False)
+            except:
+                pass
+        
+        # Smonta se necessario
+        if is_mounted(home_path):
+            rprint(f"[blue]📁 Smonto mount esistente: {home_path}[/blue]")
+            mount_manager = MountManager()
+            mount_manager.unmount_user_home(home_path)
+        
+        # ✅ SOLUZIONE SEMPLICE: USA IL SETUP ESISTENTE!
+        rprint(f"[blue]🔧 Ricrea setup completo con mount setup[/blue]")
+        
+        # Usa la funzione setup esistente che GIÀ fa tutto
+        from .mount import setup_user_with_mount
+        
+        success = setup_user_with_mount(
+            username=username,
+            password=password,
+            profile=profile,
+            remount=True  # Forza remount
+        )
+        
+        if success:
+            rprint(f"[green]✅ Servizio {service_name} ricreato con successo![/green]")
+            
+            # Verifica mount
+            if is_mounted(home_path):
+                rprint(f"[green]✅ Mount attivo: {home_path}[/green]")
+                
+                # Test I/O rapido
+                try:
+                    test_file = f"{home_path}/.service-test-{int(time.time())}"
+                    with open(test_file, 'w') as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    rprint(f"[green]✅ Test I/O riuscito[/green]")
+                except Exception as e:
+                    rprint(f"[yellow]⚠️ Test I/O parzialmente fallito: {e}[/yellow]")
+            
+            # Mostra riepilogo
+            rprint(f"\n[bold blue]📋 Riepilogo ricreazione:[/bold blue]")
+            rprint(f"• Servizio: {service_name}")
+            rprint(f"• Remote: {remote_name}")
+            rprint(f"• Utente: {username}")
+            rprint(f"• Mount point: {home_path}")
+            rprint(f"• Profilo: {profile}")
+            rprint(f"• Cache: {MOUNT_PROFILES[profile].get('storage', 'N/A')}")
+            rprint(f"• Status: 🟢 Attivo")
+            
+        else:
+            rprint(f"[red]❌ Ricreazione servizio fallita[/red]")
+            sys.exit(1)
+            
+    except Exception as e:
+        rprint(f"[red]❌ Errore ricreazione servizio: {e}[/red]")
+        sys.exit(1)
+
 
 
 if __name__ == "__main__":
