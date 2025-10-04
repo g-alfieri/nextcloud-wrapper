@@ -444,56 +444,31 @@ def estimate_storage_usage(profile: str, files_accessed_daily: int = 100,
         return "Sconosciuto"
 
 
-def create_systemd_mount_service(service_name: str, remote_name: str, 
-                                mount_point: str, user: str = "root", 
+def create_systemd_mount_service(service_name: str, username: str, 
                                 profile: str = "full") -> str:
     """
-    Genera configurazione systemd per mount automatico con profilo
-    
-    Args:
-        service_name: Nome del servizio (es. nextcloud-mount-user1)
-        remote_name: Nome remote rclone
-        mount_point: Punto di mount
-        user: Utente che esegue il servizio
-        profile: Profilo mount ("hosting", "minimal", "writes")
-        
-    Returns:
-        Contenuto file .service
+    Genera servizio systemd che delega tutto al CLI esistente
     """
-    # Opzioni per profilo
-    profile_options = {
-        "hosting": "--vfs-cache-mode off --buffer-size 0 --read-only",
-        "minimal": "--vfs-cache-mode minimal --vfs-cache-max-size 1G --buffer-size 32M", 
-        "writes": "--vfs-cache-mode writes --vfs-cache-max-size 2G --buffer-size 64M",
-        "full": "--vfs-cache-mode full --vfs-cache-max-size 5G --buffer-size 64M"
-    }
-    
-    mount_options = profile_options.get(profile, profile_options["full"])
+    remote_name = f"nc-{username}"
+    mount_point = f"/home/{username}"
     
     service_content = f"""[Unit]
-Description=RClone mount for {remote_name} -> {mount_point} (profile: {profile})
+Description=Nextcloud mount for user {username} (profile: {profile})
 After=network-online.target
 Wants=network-online.target
-AssertPathIsDirectory={mount_point}
 
 [Service]
-Type=notify
-User={user}
-Group={user}
-ExecStartPre=/bin/mkdir -p {mount_point}
-ExecStart=/usr/bin/rclone mount {remote_name}:/ {mount_point} \\
-    --config {RCLONE_CONF} \\
-    {mount_options} \\
-    --dir-cache-time 10m \\
-    --allow-other \\
-    --log-level INFO \\
-    --log-file /var/log/rclone-{remote_name}.log
-ExecStop=/bin/fusermount -u {mount_point}
+Type=forking
+User=root
+Group=root
+ExecStart=/usr/local/bin/nextcloud-wrapper mount start {remote_name} {mount_point} --profile {profile} --background
+ExecStop=/usr/local/bin/nextcloud-wrapper mount stop {mount_point}
 Restart=on-failure
 RestartSec=10
-KillMode=process
 
 [Install]
 WantedBy=multi-user.target
 """
     return service_content
+
+

@@ -260,6 +260,46 @@ def mount_info(
     except Exception as e:
         rprint(f"[yellow]⚠️ Errore informazioni spazio: {e}[/yellow]")
 
+@mount_app.command()
+def start(remote_name: str, mount_point: str, 
+         profile: str = typer.Option("full", help="Mount profile"),
+         background: bool = typer.Option(True, help="Run in background")):
+    """Start mount for remote"""
+    from .rclone import mount_remote
+    
+    success = mount_remote(remote_name, mount_point, background, profile)
+    if success:
+        rprint(f"✅ Mount started: {remote_name} -> {mount_point}")
+    else:
+        rprint(f"❌ Mount failed: {remote_name} -> {mount_point}")
+        raise typer.Exit(1)
+
+@mount_app.command() 
+def stop(mount_point: str):
+    """Stop mount at mount point"""
+    from .rclone import unmount
+    
+    if unmount(mount_point):
+        rprint(f"✅ Mount stopped: {mount_point}")
+    else:
+        rprint(f"❌ Unmount failed: {mount_point}")
+        raise typer.Exit(1)
+
+@mount_app.command()
+def restart(remote_name: str, mount_point: str,
+           profile: str = typer.Option("full", help="Mount profile")):
+    """Restart mount"""
+    from .rclone import unmount, mount_remote
+    
+    # Stop first
+    unmount(mount_point)
+    
+    # Start again  
+    if mount_remote(remote_name, mount_point, True, profile):
+        rprint(f"✅ Mount restarted: {remote_name} -> {mount_point}")
+    else:
+        rprint(f"❌ Mount restart failed")
+        raise typer.Exit(1)
 
 @mount_app.command("test")
 def test_mount(
