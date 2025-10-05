@@ -202,7 +202,7 @@ class SystemdManager:
             services = []
             
             for line in output.split('\n'):
-                if line.strip() and ("nc-" in line):
+                if line.strip() and ("ncwrap-" in line):
                     parts = line.split()
                     if len(parts) >= 4:
                         services.append({
@@ -549,7 +549,7 @@ def service_health_check() -> Dict:
     """Verifica salute di tutti i servizi nextcloud"""
     manager = SystemdManager()
     
-    all_services = list_all_webdav_services()
+    all_services = list_all_mount_services()
     health_report = {
         "healthy": [],
         "unhealthy": [],

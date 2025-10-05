@@ -42,7 +42,12 @@ FULL_CACHE_OPTIONS = [
     "--vfs-cache-mode", "full",   # Sync bidirezionale con cache intelligente
     "--vfs-cache-max-size", "5G",   # Limite cache: max 2GB (LRU cleanup)
     "--buffer-size", "64M",
-    "--dir-cache-time", "10m",
+    "--dir-cache-time", "24h",
+    "--vfs-cache-max-age", "168h",
+    "--cache-dir","/var/cache/rclone",
+    "--vfs-cache-poll-interval", "1h",
+    "--poll-interval", "2h",
+    "--attr-timeout", "1h",
     "--allow-other"
 ]
 
