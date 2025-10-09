@@ -318,7 +318,7 @@ nextcloud-wrapper setup user office@enterprise.com OfficePass456! \
 
 **Giuseppe Alfieri**  
 Senior Solutions Architect Candidate  
-[GitHub Portfolio](https://github.com/g-alfieri) | [LinkedIn Profile](#)
+[GitHub Portfolio](https://github.com/g-alfieri) | [LinkedIn Profile](https://www.linkedin.com/in/giuseppe-alfieri-bb434a82/)
 
 > *This project demonstrates advanced system architecture, performance engineering, and enterprise solution design capabilities suitable for Nvidia's Senior Solutions Architect position. The solution showcases distributed storage expertise, CLI design patterns, and scalable cloud infrastructure management.*
 
