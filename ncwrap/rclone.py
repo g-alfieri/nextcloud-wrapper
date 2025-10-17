@@ -477,6 +477,7 @@ def create_systemd_mount_service(username: str,
 Description=Nextcloud mount for user {username} (profile: {profile})
 After=network-online.target
 Wants=network-online.target
+Before=docker.service
 
 [Service]
 Type=forking
