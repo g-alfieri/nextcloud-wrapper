@@ -1,491 +1,477 @@
-# NextCloud Enterprise Wrapper - Cloud Storage Solution Architecture
+# NextCloud Wrapper - rclone Engine Semplificato
 
-> **Senior Solutions Architect Portfolio Project**  
-> Distributed cloud storage integration platform with enterprise-grade CLI management interface
+> **Versione 1.0.0rc2** - Wrapper Python per gestire Nextcloud con rclone engine semplificato
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![rclone](https://img.shields.io/badge/rclone-Engine-green.svg)](https://rclone.org)
-[![License](https://img.shields.io/badge/License-Enterprise-red.svg)]()
-[![Architecture](https://img.shields.io/badge/Architecture-Microservices-orange.svg)]()
+[![Version](https://img.shields.io/badge/Version-1.0.0rc2-orange.svg)]()
 
-## 🚀 Quick Setup Guide
+## 🚀 Quick Setup - Guida Rapida
 
-### Prerequisites
-- Python 3.8 or higher
+### Prerequisiti
+- Python 3.8 o superiore
 - Git
-- Linux/macOS environment (Windows with WSL2 recommended)
-- Internet connection for downloading dependencies
+- Sistema Linux/Unix (testato su Ubuntu/Debian)
+- Privilegi sudo per creazione utenti Linux
+- Istanza NextCloud accessibile
 
-### 1. Clone and Setup Development Environment
+### 1. Clonazione e Setup Iniziale
 
 ```bash
-# Clone the repository
+# Clona il repository
 git clone https://github.com/g-alfieri/nextcloud-wrapper.git
 cd nextcloud-wrapper
 
-# Setup Miniconda environment (recommended)
+# Setup ambiente Python (opzione 1: Miniconda - raccomandato)
 ./setup-miniconda.sh
 
-# OR use Python venv
+# Setup ambiente Python (opzione 2: venv standard)
 python -m venv nextcloud-wrapper-env
-source nextcloud-wrapper-env/bin/activate  # On Linux/macOS
-# nextcloud-wrapper-env\Scripts\activate     # On Windows
+source nextcloud-wrapper-env/bin/activate  # Linux/macOS
 
-# Install dependencies
+# Installa dipendenze
 pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2. Basic Configuration
+### 2. Configurazione Base
 
 ```bash
-# Copy environment template
+# Copia il template di configurazione
 cp .env.example .env
 
-# Edit configuration file with your NextCloud instance details
-nano .env  # or use your preferred editor
+# Modifica con i tuoi dati NextCloud
+nano .env
 ```
 
-**Minimum Required Configuration (.env):**
+**Configurazione Minima Richiesta (.env):**
 ```bash
-# NextCloud Instance
-NC_BASE_URL=https://your-nextcloud-instance.com
-NC_ADMIN_USER=your_admin_username
-NC_ADMIN_PASS=your_admin_password
+# Configurazione NextCloud Instance
+NC_BASE_URL=https://tuo-nextcloud.esempio.com
+NC_ADMIN_USER=admin
+NC_ADMIN_PASS=password_admin
 
-# Default Profile (choose one: hosting, minimal, writes, full)
-NC_DEFAULT_RCLONE_PROFILE=minimal
+# Profilo rclone predefinito
+NC_DEFAULT_RCLONE_PROFILE=full
 ```
 
-### 3. Quick Start for Standard Users
+### 3. Primi Passi - Setup Utente Standard
 
 ```bash
-# Setup a standard user with minimal profile (recommended for beginners)
-nextcloud-wrapper setup user username domain.com password123 --profile=minimal
+# Verifica configurazione
+nextcloud-wrapper config
 
-# OR use the interactive quick setup
-python setup-quick.py
+# Setup rapido utente con profilo predefinito
+nextcloud-wrapper setup quick nomedominio.com password123
 
-# Verify installation
+# Oppure setup completo con opzioni
+nextcloud-wrapper setup user nomedominio.com password123 \
+  --quota 100G --profile full
+
+# Verifica status
+nextcloud-wrapper status
 nextcloud-wrapper mount status
+```
+
+### 4. Verifica Funzionamento
+
+```bash
+# Lista utenti configurati
 nextcloud-wrapper user list
-```
 
-### 4. Development Environment Setup
+# Informazioni dettagliate utente
+nextcloud-wrapper user info nomedominio.com
 
-```bash
-# For development with full features
-nextcloud-wrapper setup user dev-user dev.local DevPass123! --profile=full
+# Status mount rclone
+nextcloud-wrapper mount status
 
-# Run tests to verify everything works
-./test-complete.sh
-
-# Or run individual tests
-python test_import.py
-python test_env_loading.py
-```
-
-### 5. Common Use Cases
-
-**Web Hosting Setup:**
-```bash
-nextcloud-wrapper setup user webhost example.com SecurePass2024! --profile=hosting
-```
-
-**Development/Collaboration Setup:**
-```bash
-nextcloud-wrapper setup user dev-team company.local DevSecure456! --profile=writes
-```
-
-**Enterprise Office Setup:**
-```bash
-nextcloud-wrapper setup user office enterprise.local OfficePass789! --profile=full
+# Lista servizi systemd
+nextcloud-wrapper mount service list
 ```
 
 ---
 
-## 🎯 Solution Overview
+## 📋 Comandi CLI Disponibili
 
-**NextCloud Enterprise Wrapper** is a sophisticated cloud storage integration platform designed for enterprise hosting providers requiring seamless NextCloud filesystem integration. The solution demonstrates advanced system architecture principles, distributed storage management, and enterprise CLI design patterns.
+### Comandi Principali
 
-### Key Architecture Achievements
-
-- **Distributed Storage Layer**: Multi-backend support with intelligent caching strategies
-- **Performance Optimization**: 60% reduction in I/O latency through optimized mount profiles  
-- **Scalability Design**: Concurrent operations with async I/O patterns
-- **Enterprise CLI**: Type-safe command interface with rich output formatting
-- **Resource Management**: Intelligent cache management with LRU algorithms
-
-## 🏗️ System Architecture
-
-```
-┌─────────────────┬─────────────────┬─────────────────┐
-│   CLI Layer     │  Service Layer  │  Storage Layer  │
-├─────────────────┼─────────────────┼─────────────────┤
-│ • Typer CLI     │ • Mount Manager │ • rclone Engine │
-│ • Rich Output   │ • User Manager  │ • VFS Layer     │
-│ • Arg Parsing   │ • Config Mgmt   │ • Cache System  │
-│ • Validation    │ • SystemD Svc   │ • Sync Engine   │
-└─────────────────┴─────────────────┴─────────────────┘
-```
-
-### Performance Profiles Matrix
-
-| Profile | Cache Strategy | I/O Pattern | Throughput | Use Case |
-|---------|---------------|-------------|------------|----------|
-| `hosting` | Zero-copy streaming | Read-optimized | 40-60 MB/s | Web servers, CDN |
-| `minimal` | 1GB temp cache | Balanced | 60-90 MB/s | Lightweight hosting |
-| `writes` | 2GB LRU persistent | Write-optimized | 80-120 MB/s | Development, CI/CD |
-| `full` | 5GB LRU persistent | Maximum performance | 100-140 MB/s | Enterprise workloads |
-
-## 🚀 CLI Command Reference
-
-### Core Management Commands
-
-#### Setup & Provisioning
 ```bash
-# Enterprise user provisioning with performance profile
-nextcloud-wrapper setup user <username> <domain> <password> --profile=<profile>
+nextcloud-wrapper --version          # Mostra versione
+nextcloud-wrapper config             # Mostra configurazione
+nextcloud-wrapper status             # Status generale sistema
+```
 
-# Quick deployment for standard configurations  
-nextcloud-wrapper setup quick <domain> <password>
+### Setup e Configurazione
 
-# Display available performance profiles
+```bash
+# Setup completo utente
+nextcloud-wrapper setup user <username> <password> [opzioni]
+  --quota <size>          # Quota NextCloud (es. 100G)
+  --profile <profile>     # Profilo rclone (hosting/minimal/writes/full)
+  --sub <domains>         # Sottodomini (es. www,blog,shop)
+  --skip-linux           # Non creare utente Linux
+  --skip-test            # Non testare connettività
+  --service/--no-service # Crea/non creare servizio systemd
+  --remount              # Forza remount se già esistente
+
+# Setup rapido con predefiniti
+nextcloud-wrapper setup quick <username> <password>
+
+# Mostra profili disponibili
 nextcloud-wrapper setup profiles
+
+# Mostra configurazione setup
+nextcloud-wrapper setup config
 ```
 
-#### Mount Management
+### Gestione Mount
+
 ```bash
-# List available mount profiles with specifications
+# Lista profili mount disponibili
 nextcloud-wrapper mount profiles
 
-# Manual mount with specific performance configuration
-nextcloud-wrapper mount mount <username> <password> --profile=<profile>
+# Mount manuale utente
+nextcloud-wrapper mount mount <username> <password> [opzioni]
+  --mount-point <path>    # Directory mount (default: /home/username)
+  --profile <profile>     # Profilo mount
+  --service/--no-service # Crea servizio systemd
+  --force                # Forza mount anche se directory non vuota
+  --remount              # Forza remount se già montato
 
-# Real-time mount status monitoring
-nextcloud-wrapper mount status [--json] [--verbose]
+# Unmount directory
+nextcloud-wrapper mount unmount <mount_point>
 
-# Temporary mount for testing and validation
-nextcloud-wrapper mount test <username> <password> --profile=<profile>
+# Status mount attivi
+nextcloud-wrapper mount status [--detailed]
 
-# Complete setup with automatic service configuration
-nextcloud-wrapper mount setup <username> <password> --profile=<profile>
+# Informazioni mount specifico
+nextcloud-wrapper mount info <mount_point> [--check-space]
 
-# Safe unmount with cleanup
-nextcloud-wrapper mount unmount <path> [--force]
+# Test mount temporaneo
+nextcloud-wrapper mount test <username> <password> [--profile <profile>]
+
+# Setup completo mount + utente
+nextcloud-wrapper mount setup <username> <password> [opzioni]
+
+# Installa rclone
+nextcloud-wrapper mount install [--configure/--no-configure]
 ```
 
-#### User & Resource Management
-```bash
-# List all managed users with mount status
-nextcloud-wrapper user list [--format=table|json]
+### Gestione Utenti
 
-# Detailed user information and resource usage
+```bash
+# Lista tutti gli utenti
+nextcloud-wrapper user list [--format table|json]
+
+# Informazioni utente dettagliate
 nextcloud-wrapper user info <username> [--include-stats]
 
-# Quick mount for existing user with profile override
-nextcloud-wrapper user mount <username> --profile=<profile>
+# Mount rapido utente esistente
+nextcloud-wrapper user mount <username> [--profile <profile>]
 
-# Resource usage statistics
-nextcloud-wrapper user stats <username> [--time-range=24h]
+# Statistiche utilizzo utente
+nextcloud-wrapper user stats <username> [--time-range 24h]
 ```
 
-#### Virtual Environment Management
-```bash
-# Initialize Python virtual environment
-nextcloud-wrapper venv setup [--python=3.8+]
+### Gestione Servizi SystemD
 
-# Activate environment with dependency validation
+```bash
+# Lista servizi nextcloud-wrapper
+nextcloud-wrapper mount service list
+
+# Status servizio specifico
+nextcloud-wrapper mount service status <service_name> [--user]
+
+# Abilita/avvia servizio
+nextcloud-wrapper mount service enable <service_name> [--user]
+
+# Disabilita/ferma servizio
+nextcloud-wrapper mount service disable <service_name> [--user]
+
+# Riavvia servizio
+nextcloud-wrapper mount service restart <service_name> [--user]
+
+# Mostra log servizio
+nextcloud-wrapper mount service logs <service_name> [--user] [--lines 50] [--follow]
+
+# Ricrea servizio per utente esistente
+nextcloud-wrapper mount service recreate <username> [--password <pass>] [--profile <profile>] [--force]
+```
+
+### Ambiente Virtuale
+
+```bash
+# Setup virtual environment
+nextcloud-wrapper venv setup [--python 3.8+]
+
+# Attiva ambiente
 nextcloud-wrapper venv activate
 
-# Environment status and health check
+# Status ambiente
 nextcloud-wrapper venv status
 ```
 
-### Advanced Operations
+---
 
-#### Performance Monitoring
+## 🎯 Profili rclone Disponibili
+
+| Profilo | Cache | Sync | Uso | Performance |
+|---------|-------|------|-----|-------------|
+| **hosting** | 0 bytes (streaming) | Read-only | Web hosting, SFTP | Network dependent |
+| **minimal** | Max 1GB, auto-cleanup | Read-only | Hosting leggero | Buona con cache |
+| **writes** | Max 2GB, persistente | Bidirezionale | Sviluppo, editing | Ottima |
+| **full** | Max 5GB, persistente | Bidirezionale | Uso completo | Migliore |
+
+### Dettagli Profili
+
+**hosting**: Zero cache locale, streaming puro per web server e CDN
+- Ideale per: Apache/Nginx serving, accesso SFTP read-only
+- Storage: 0 bytes, tutto in streaming
+- Sync: Solo lettura, nessun upload
+
+**minimal**: Cache temporanea con pulizia automatica
+- Ideale per: Hosting con cache temporanea, accessi sporadici
+- Storage: Max 1GB con auto-cleanup ogni ora
+- Sync: Solo lettura, nessun upload
+
+**writes**: Cache intelligente per file modificati
+- Ideale per: Sviluppo, editing file, sync automatico modifiche
+- Storage: Max 2GB persistente con cleanup LRU
+- Sync: Bidirezionale completo
+
+**full**: Cache completa per massime performance
+- Ideale per: Uso intensivo, proxy filesystem completo
+- Storage: Max 5GB persistente con cleanup LRU
+- Sync: Bidirezionale completo
+
+---
+
+## 💡 Esempi d'Uso Pratici
+
+### Setup Hosting Web
 ```bash
-# Real-time I/O performance metrics
-nextcloud-wrapper monitor io [--interval=5s]
-
-# Cache efficiency statistics
-nextcloud-wrapper monitor cache <username>
-
-# System resource utilization
-nextcloud-wrapper monitor system [--export=json]
+# Hosting con profilo ottimizzato e sottodomini
+sudo nextcloud-wrapper setup user sito.com password123 \
+  --profile hosting \
+  --quota 500G \
+  --sub www,blog,shop
 ```
 
-#### Configuration Management
+### Setup Sviluppo
 ```bash
-# Display current configuration
-nextcloud-wrapper config show [--section=<section>]
-
-# Validate configuration integrity
-nextcloud-wrapper config validate
-
-# Export configuration for backup/migration
-nextcloud-wrapper config export --output=config.json
+# Ambiente sviluppo con sync bidirezionale
+sudo nextcloud-wrapper setup user dev.locale devpass456 \
+  --profile writes \
+  --quota 50G
 ```
 
-#### Troubleshooting & Diagnostics
+### Setup Enterprise
 ```bash
-# Comprehensive system diagnostics
-nextcloud-wrapper diagnose [--full] [--export=report.json]
-
-# Test connectivity and authentication
-nextcloud-wrapper test connection <username> <password>
-
-# Validate mount integrity
-nextcloud-wrapper test mount <path>
-
-# Performance benchmark suite
-nextcloud-wrapper benchmark --profile=<profile> [--duration=60s]
+# Configurazione enterprise con cache massima
+sudo nextcloud-wrapper setup user azienda.com enterprisepass \
+  --profile full \
+  --quota 1T
 ```
 
-## 🛠️ Installation Options
+### Test e Debug
+```bash
+# Test connettività e mount temporaneo
+nextcloud-wrapper mount test utente.com password --profile minimal
 
-### Option 1: Automated Setup (Recommended)
+# Ricrea servizio sistemd per utente esistente
+sudo nextcloud-wrapper mount service recreate utente.com --profile full --force
+```
+
+---
+
+## 🛠️ Installazione Dettagliata
+
+### Opzione 1: Setup Automatizzato (Raccomandato)
 
 ```bash
-# Clone and run automated setup
 git clone https://github.com/g-alfieri/nextcloud-wrapper.git
 cd nextcloud-wrapper
 ./setup-miniconda.sh
-python setup-quick.py
+# Segui le istruzioni per configurare .env
 ```
 
-### Option 2: Manual Installation
+### Opzione 2: Python venv
 
 ```bash
-# Python venv method
 python -m venv nextcloud-wrapper-env
 source nextcloud-wrapper-env/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
 
-### Option 3: Conda Environment
+### Opzione 3: Conda Environment
 
 ```bash
-# Using conda/miniconda
 conda env create -f environment.yml
 conda activate nextcloud-wrapper
 ```
 
-## 🔧 Enterprise Configuration
+### Verifica Installazione
 
-### Complete Environment Configuration (.env)
+```bash
+# Test importi Python
+python test_import.py
+
+# Test caricamento configurazione
+python test_env_loading.py
+
+# Test completo
+./test-complete.sh
+```
+
+---
+
+## 🚨 Risoluzione Problemi
+
+### Problemi Comuni
+
+**Errore "Privilegi sudo richiesti"**
+```bash
+# Assicurati di eseguire con sudo per operazioni di sistema
+sudo nextcloud-wrapper setup user ...
+```
+
+**Errore "rclone non disponibile"**
+```bash
+# Installa rclone automaticamente
+sudo nextcloud-wrapper mount install
+```
+
+**Problemi di line endings (Windows)**
+```bash
+# Fix automatico per file .env
+./fix-env-crlf.sh
+```
+
+**Test connettività fallito**
+```bash
+# Verifica configurazione
+nextcloud-wrapper config
+
+# Test manuale connettività
+nextcloud-wrapper mount test username password
+```
+
+### Debug e Diagnostica
+
+```bash
+# Test completo ambiente
+./test-complete.sh
+
+# Informazioni sistema
+nextcloud-wrapper status
+
+# Log servizi
+nextcloud-wrapper mount service logs ncwrap-rclone-username --lines 100
+
+# Status mount dettagliato
+nextcloud-wrapper mount status --detailed
+```
+
+---
+
+## 📂 Struttura Progetto
+
+```
+nextcloud-wrapper/
+├── ncwrap/                 # Package principale
+│   ├── cli.py             # CLI principale
+│   ├── cli_setup.py       # Comandi setup
+│   ├── cli_mount.py       # Comandi mount
+│   ├── cli_user.py        # Comandi utente
+│   ├── cli_venv.py        # Comandi ambiente virtuale
+│   ├── api.py             # API NextCloud
+│   ├── rclone.py          # Gestione rclone
+│   ├── mount.py           # Logica mount
+│   ├── system.py          # Operazioni sistema
+│   ├── systemd.py         # Gestione servizi
+│   └── utils.py           # Utility
+├── .env.example           # Template configurazione
+├── requirements.txt       # Dipendenze Python
+├── setup-miniconda.sh     # Setup automatico
+├── test-complete.sh       # Test completo
+└── pyproject.toml         # Configurazione progetto
+```
+
+---
+
+## 🔧 Configurazione Avanzata
+
+### File .env Completo
+
 ```bash
 # NextCloud Instance Configuration
-NC_BASE_URL=https://enterprise.nextcloud.example.com
+NC_BASE_URL=https://cloud.esempio.com
 NC_ADMIN_USER=admin
-NC_ADMIN_PASS=enterprise_admin_password
+NC_ADMIN_PASS=password_admin
 NC_API_TIMEOUT=30
 NC_MAX_RETRIES=3
 
-# Performance Tuning
+# rclone Configuration
 NC_DEFAULT_RCLONE_PROFILE=full
 NC_CACHE_DIR=/var/cache/nextcloud-wrapper
 NC_LOG_LEVEL=INFO
 NC_MAX_CONCURRENT_MOUNTS=50
 
 # Virtual Environment
-NC_VENV_NAME=nextcloud-wrapper-enterprise
+NC_VENV_NAME=nextcloud-wrapper
 NC_AUTO_ACTIVATE=true
 NC_PYTHON_VERSION=3.8+
 
-# Security Settings  
+# Security Settings
 NC_SSL_VERIFY=true
 NC_BACKUP_RETENTION_DAYS=30
 NC_AUDIT_LOG_ENABLED=true
 ```
 
-### SystemD Service Integration
-```bash
-# Auto-generated service for each user mount
-systemctl status nextcloud-wrapper@username.service
+### Ottimizzazione Performance
 
-# Service management through CLI
-nextcloud-wrapper service enable <username>
-nextcloud-wrapper service disable <username>
-nextcloud-wrapper service restart <username>
-```
-
-## 🚨 Troubleshooting Common Issues
-
-### Environment Issues
-```bash
-# Fix CRLF line ending issues (common on Windows)
-./fix-env-crlf.sh
-
-# Test environment loading
-python test_env_loading.py
-
-# Test package imports
-python test_import.py
-```
-
-### Connection Issues
-```bash
-# Test NextCloud connectivity
-nextcloud-wrapper test connection admin your_password
-
-# Verify rclone installation
-rclone version
-
-# Check mount status
-nextcloud-wrapper mount status --verbose
-```
-
-### Performance Issues
-```bash
-# Run benchmark tests
-nextcloud-wrapper benchmark --profile=minimal
-
-# Check system resources
-nextcloud-wrapper monitor system
-
-# Clear cache if needed
-rm -rf /var/cache/nextcloud-wrapper/*
-```
-
-## 📊 Performance Benchmarks
-
-### I/O Performance Comparison
-
-| Operation | rclone Engine | Legacy WebDAV | Improvement |
-|-----------|---------------|---------------|-------------|
-| Mount Time | < 3s | 15-30s | **-90%** |
-| Memory Usage | 50-150MB | 200-400MB | **-62%** |
-| Read Latency | < 50ms | 200-500ms | **-80%** |
-| Write Throughput | 45-70 MB/s | 15-25 MB/s | **+180%** |
-| Concurrent Ops | Unlimited | 5-10 | **Unlimited** |
-
-### Scalability Metrics
-- **Concurrent Users**: 100+ simultaneous mounts tested
-- **Cache Efficiency**: 95%+ hit rate with LRU strategy  
-- **Resource Scaling**: Linear scaling up to 50 concurrent operations
-- **Memory Footprint**: O(log n) growth with user count
-
-## 🎯 Enterprise Use Cases
-
-### High-Performance Web Hosting
-```bash
-# Multi-tenant hosting with zero-cache streaming
-nextcloud-wrapper setup user webhost.example.com SecurePass2024! \
-  --profile=hosting \
-  --subdomains=www,blog,shop,api \
-  --ssl-redirect=true
-```
-
-### DevOps & CI/CD Integration  
-```bash
-# Development environment with full sync capabilities
-nextcloud-wrapper setup user dev-team@company.com DevSecurePass! \
-  --profile=full \
-  --git-hooks=true \
-  --backup-schedule=hourly
-```
-
-### Enterprise Office Integration
-```bash
-# Office users with collaborative editing
-nextcloud-wrapper setup user office@enterprise.com OfficePass456! \
-  --profile=writes \
-  --collaboration=true \
-  --audit-logging=enabled
-```
-
-## 🔒 Security & Compliance
-
-### Security Features
-- **Encrypted Authentication**: Secure credential storage with industry-standard encryption
-- **Audit Logging**: Comprehensive activity tracking for compliance requirements
-- **Access Control**: Role-based permissions with enterprise directory integration
-- **SSL/TLS**: End-to-end encryption for all data transfers
-
-### Compliance Standards
-- **SOC 2 Ready**: Security controls and monitoring capabilities
-- **GDPR Compliant**: Data residency and privacy controls
-- **ISO 27001**: Information security management alignment
-- **Enterprise Backup**: Automated backup and disaster recovery procedures
-
-## 🚀 Solution Architecture Benefits
-
-### Technical Leadership Demonstrated
-- **System Design**: Microservices architecture with clean separation of concerns
-- **Performance Engineering**: 60-80% performance improvements through optimized algorithms
-- **Scalability Planning**: Designed for horizontal scaling with container orchestration
-- **Developer Experience**: Intuitive CLI interface with comprehensive error handling
-
-### Enterprise Integration Capabilities
-- **API-First Design**: RESTful architecture for easy integration
-- **Monitoring Integration**: Prometheus metrics and structured logging
-- **Container Ready**: Docker and Kubernetes deployment configurations
-- **Cloud Native**: Multi-cloud provider support (AWS, GCP, Azure)
-
-## 🛠️ Technology Stack
-
-### Core Technologies
-- **Backend**: Python 3.8+ with async/await patterns
-- **Storage Engine**: rclone with VFS optimization  
-- **CLI Framework**: Typer with Rich terminal output
-- **Service Management**: SystemD integration
-- **Configuration**: Environment-based with validation
-
-### Enterprise Integrations
-- **Monitoring**: Prometheus + Grafana metrics
-- **Logging**: Structured JSON logging with ELK stack compatibility
-- **Authentication**: LDAP/AD integration capabilities
-- **Backup**: Automated backup scheduling with retention policies
-
-## 📈 Roadmap & Future Enhancements
-
-### Q4 2025 Targets
-- [ ] **Kubernetes Operator**: Native K8s deployment and management
-- [ ] **Metrics Dashboard**: Real-time performance monitoring Web UI  
-- [ ] **Auto-scaling**: Dynamic resource allocation based on usage patterns
-- [ ] **Multi-Cloud**: Direct S3/GCS/Azure Blob integration
-
-### 2026 Strategic Goals  
-- [ ] **AI-Powered Optimization**: Machine learning-based cache prediction
-- [ ] **Edge Computing**: CDN integration with edge cache distribution
-- [ ] **Blockchain Integration**: Immutable audit trails and data provenance
-- [ ] **Zero-Trust Security**: Enhanced security model implementation
-
-## 🏆 Professional Highlights
-
-### Senior Solutions Architect Skills Demonstrated
-
-**System Architecture & Design**
-- Microservices architecture with clean API boundaries
-- Performance-first design with measurable improvements  
-- Scalable caching strategies with intelligent algorithms
-- Enterprise-grade CLI interface design
-
-**Technical Leadership**  
-- 61% code reduction through architectural refactoring
-- Cross-functional technology integration (storage, networking, security)
-- Performance optimization delivering 2-3x throughput improvements
-- Developer productivity tools and automation
-
-**Enterprise Solutions**
-- Multi-tenant hosting platform capabilities
-- Security and compliance framework integration
-- Monitoring and observability implementation  
-- Production deployment and operational procedures
+- **hosting**: Per web server con accesso principalmente read-only
+- **minimal**: Per uso sporadico con pulizia automatica cache
+- **writes**: Per sviluppo con sync bidirezionale efficiente
+- **full**: Per uso intensivo con cache massima
 
 ---
 
-## 📞 Contact & Portfolio
+## 🏗️ Architettura Sistema
 
-**Giuseppe Alfieri**  
-Senior Solutions Architect Candidate  
-[GitHub Portfolio](https://github.com/g-alfieri) | [LinkedIn Profile](https://www.linkedin.com/in/giuseppe-alfieri-bb434a82/)
+### Componenti Principali
 
-> *This project demonstrates advanced system architecture, performance engineering, and enterprise solution design capabilities suitable for Nvidia's Senior Solutions Architect position. The solution showcases distributed storage expertise, CLI design patterns, and scalable cloud infrastructure management.*
+- **CLI Layer**: Interfaccia utente con Typer + Rich
+- **rclone Engine**: Unico engine per mount e sync
+- **SystemD Integration**: Servizi automatici per mount persistenti
+- **NextCloud API**: Gestione utenti e configurazione
+- **Cache LRU**: Gestione automatica spazio cache
+
+### Flusso Operazioni
+
+1. **Setup**: Crea utente NextCloud + Linux + mount rclone
+2. **Mount**: Configura remote rclone + mount con profilo specifico
+3. **Service**: Crea servizio systemd per mount automatico
+4. **Sync**: Gestione automatica sync bidirezionale
+5. **Cache**: Cleanup automatico LRU basato su profilo
 
 ---
 
-**© 2025 Giuseppe Alfieri - Enterprise Cloud Storage Solutions Architecture**
+## 📞 Supporto e Contributi
+
+**Repository**: [https://github.com/g-alfieri/nextcloud-wrapper](https://github.com/g-alfieri/nextcloud-wrapper)  
+**Sviluppatore**: Giuseppe Alfieri  
+**Versione**: 1.0.0rc2  
+**Engine**: rclone Semplificato  
+
+### Segnalazione Bug
+
+Per segnalare problemi:
+1. Esegui `./test-complete.sh` per diagnostica
+2. Raccogli log con `nextcloud-wrapper mount service logs`
+3. Apri issue su GitHub con log completi
+
+---
+
+**© 2025 Giuseppe Alfieri - NextCloud Wrapper rclone Engine**
