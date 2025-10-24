@@ -8,6 +8,102 @@
 [![License](https://img.shields.io/badge/License-Enterprise-red.svg)]()
 [![Architecture](https://img.shields.io/badge/Architecture-Microservices-orange.svg)]()
 
+## 🚀 Quick Setup Guide
+
+### Prerequisites
+- Python 3.8 or higher
+- Git
+- Linux/macOS environment (Windows with WSL2 recommended)
+- Internet connection for downloading dependencies
+
+### 1. Clone and Setup Development Environment
+
+```bash
+# Clone the repository
+git clone https://github.com/g-alfieri/nextcloud-wrapper.git
+cd nextcloud-wrapper
+
+# Setup Miniconda environment (recommended)
+./setup-miniconda.sh
+
+# OR use Python venv
+python -m venv nextcloud-wrapper-env
+source nextcloud-wrapper-env/bin/activate  # On Linux/macOS
+# nextcloud-wrapper-env\Scripts\activate     # On Windows
+
+# Install dependencies
+pip install -r requirements.txt
+pip install -e .
+```
+
+### 2. Basic Configuration
+
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit configuration file with your NextCloud instance details
+nano .env  # or use your preferred editor
+```
+
+**Minimum Required Configuration (.env):**
+```bash
+# NextCloud Instance
+NC_BASE_URL=https://your-nextcloud-instance.com
+NC_ADMIN_USER=your_admin_username
+NC_ADMIN_PASS=your_admin_password
+
+# Default Profile (choose one: hosting, minimal, writes, full)
+NC_DEFAULT_RCLONE_PROFILE=minimal
+```
+
+### 3. Quick Start for Standard Users
+
+```bash
+# Setup a standard user with minimal profile (recommended for beginners)
+nextcloud-wrapper setup user username domain.com password123 --profile=minimal
+
+# OR use the interactive quick setup
+python setup-quick.py
+
+# Verify installation
+nextcloud-wrapper mount status
+nextcloud-wrapper user list
+```
+
+### 4. Development Environment Setup
+
+```bash
+# For development with full features
+nextcloud-wrapper setup user dev-user dev.local DevPass123! --profile=full
+
+# Run tests to verify everything works
+./test-complete.sh
+
+# Or run individual tests
+python test_import.py
+python test_env_loading.py
+```
+
+### 5. Common Use Cases
+
+**Web Hosting Setup:**
+```bash
+nextcloud-wrapper setup user webhost example.com SecurePass2024! --profile=hosting
+```
+
+**Development/Collaboration Setup:**
+```bash
+nextcloud-wrapper setup user dev-team company.local DevSecure456! --profile=writes
+```
+
+**Enterprise Office Setup:**
+```bash
+nextcloud-wrapper setup user office enterprise.local OfficePass789! --profile=full
+```
+
+---
+
 ## 🎯 Solution Overview
 
 **NextCloud Enterprise Wrapper** is a sophisticated cloud storage integration platform designed for enterprise hosting providers requiring seamless NextCloud filesystem integration. The solution demonstrates advanced system architecture principles, distributed storage management, and enterprise CLI design patterns.
@@ -147,9 +243,39 @@ nextcloud-wrapper test mount <path>
 nextcloud-wrapper benchmark --profile=<profile> [--duration=60s]
 ```
 
+## 🛠️ Installation Options
+
+### Option 1: Automated Setup (Recommended)
+
+```bash
+# Clone and run automated setup
+git clone https://github.com/g-alfieri/nextcloud-wrapper.git
+cd nextcloud-wrapper
+./setup-miniconda.sh
+python setup-quick.py
+```
+
+### Option 2: Manual Installation
+
+```bash
+# Python venv method
+python -m venv nextcloud-wrapper-env
+source nextcloud-wrapper-env/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+### Option 3: Conda Environment
+
+```bash
+# Using conda/miniconda
+conda env create -f environment.yml
+conda activate nextcloud-wrapper
+```
+
 ## 🔧 Enterprise Configuration
 
-### Environment Configuration (.env)
+### Complete Environment Configuration (.env)
 ```bash
 # NextCloud Instance Configuration
 NC_BASE_URL=https://enterprise.nextcloud.example.com
@@ -184,6 +310,44 @@ systemctl status nextcloud-wrapper@username.service
 nextcloud-wrapper service enable <username>
 nextcloud-wrapper service disable <username>
 nextcloud-wrapper service restart <username>
+```
+
+## 🚨 Troubleshooting Common Issues
+
+### Environment Issues
+```bash
+# Fix CRLF line ending issues (common on Windows)
+./fix-env-crlf.sh
+
+# Test environment loading
+python test_env_loading.py
+
+# Test package imports
+python test_import.py
+```
+
+### Connection Issues
+```bash
+# Test NextCloud connectivity
+nextcloud-wrapper test connection admin your_password
+
+# Verify rclone installation
+rclone version
+
+# Check mount status
+nextcloud-wrapper mount status --verbose
+```
+
+### Performance Issues
+```bash
+# Run benchmark tests
+nextcloud-wrapper benchmark --profile=minimal
+
+# Check system resources
+nextcloud-wrapper monitor system
+
+# Clear cache if needed
+rm -rf /var/cache/nextcloud-wrapper/*
 ```
 
 ## 📊 Performance Benchmarks
