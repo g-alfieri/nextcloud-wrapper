@@ -28,8 +28,9 @@ class MountManager:
     Gestore mount Nextcloud v1.0.0rc2 - solo rclone
     """
     
-    def __init__(self, preferred_engine: MountEngine = MountEngine.RCLONE):
+    def __init__(self, preferred_engine: MountEngine = MountEngine.RCLONE, use_bearer_token: bool = True):
         self.preferred_engine = MountEngine.RCLONE  # Fisso v1.0
+        self.use_bearer_token = use_bearer_token  # AppAPI compatibility
         
         # Configurazione engine
         self.config = {
@@ -93,10 +94,10 @@ class MountManager:
             return False
     
     def setup_credentials(self, username: str, password: str) -> bool:
-        """Setup credenziali per rclone"""
+        """Setup credenziali per rclone con supporto bearer token"""
         base_url, _, _ = get_nc_config()
         remote_name = f"nc-{username}"
-        return add_nextcloud_remote(remote_name, base_url, username, password)
+        return add_nextcloud_remote(remote_name, base_url, username, password, self.use_bearer_token)
     
     def mount_user_home(self, username: str, password: str, home_path: str = None, 
                        profile: str = "full", remount: bool = False, **kwargs) -> Dict:
@@ -326,16 +327,17 @@ class MountManager:
 
 
 def setup_user_with_mount(username: str, password: str, quota: str = None,
-                         profile: str = "full", remount: bool = False) -> bool:
+                         profile: str = "full", remount: bool = False, use_bearer_token: bool = True) -> bool:
     """
     Setup completo utente con rclone engine (v1.0.0rc2 semplificato)
     
     Args:
         username: Nome utente
-        password: Password
+        password: Password o App Password/Bearer Token
         quota: Quota Nextcloud (es. "100G") - solo per info
         profile: Profilo rclone mount
         remount: Forza remount se già esistente
+        use_bearer_token: Usa bearer token invece di basic auth (default: True per AppAPI)
     
     Returns:
         True se setup completato
@@ -349,7 +351,7 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
         print(f"💡 Profili disponibili: {', '.join(MOUNT_PROFILES.keys())}")
         return False
     
-    mount_manager = MountManager(MountEngine.RCLONE)
+    mount_manager = MountManager(MountEngine.RCLONE, use_bearer_token=use_bearer_token)
     
     # 1. Verifica e installa rclone
     available_engines = mount_manager.detect_available_engines()
@@ -425,6 +427,7 @@ def setup_user_with_mount(username: str, password: str, quota: str = None,
     print(f"🎉 Setup completato per {username}")
     print(f"• Engine: rclone")
     print(f"• Profilo: {profile}")
+    print(f"• Auth: {'Bearer Token (AppAPI)' if use_bearer_token else 'Basic Auth (legacy)'}")
     print(f"• Home directory: {home_path} → Nextcloud WebDAV")
     print(f"• Gestione spazio: automatica (cache LRU)")
     
