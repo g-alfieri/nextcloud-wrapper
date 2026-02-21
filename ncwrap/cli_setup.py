@@ -19,9 +19,10 @@ console = Console()
 @setup_app.command()
 def user(
     username: str = typer.Argument(help="Nome utente (es. ecommerce.it)"),
-    password: str = typer.Argument(help="Password utente"),
+    password: str = typer.Argument(help="Password utente o App Password/Bearer Token"),
     quota: str = typer.Option("100G", help="Quota Nextcloud (es. 100G, 500G)"),
     profile: str = typer.Option("full", "--profile", help="Profilo rclone (hosting/minimal/writes/full)"),
+    auth_mode: str = typer.Option("bearer", "--auth-mode", help="Metodo autenticazione: bearer (AppAPI, default) o basic (legacy)"),
     subdomains: List[str] = typer.Option([], "--sub", help="Sottodomini da creare (www,blog,shop)"),
     skip_linux: bool = typer.Option(False, "--skip-linux", help="Non creare utente Linux"),
     skip_test: bool = typer.Option(False, "--skip-test", help="Non testare connettività"),
@@ -32,14 +33,23 @@ def user(
     Setup completo utente con rclone engine (v1.0.0rc2)
     
     Esempi:
-    • nextcloud-wrapper setup user domain.com password123 --quota 100G
-    • nextcloud-wrapper setup user dev.com pass --profile full
-    • nextcloud-wrapper setup user hosting.com pass --profile hosting --sub www,blog
+    • nextcloud-wrapper setup user domain.com APP_PASSWORD --quota 100G
+    • nextcloud-wrapper setup user dev.com token --profile full --auth-mode bearer
+    • nextcloud-wrapper setup user hosting.com pass --profile hosting --sub www,blog --auth-mode basic
     """
     
     rprint(f"[bold blue]🚀 Nextcloud Wrapper v1.0.0rc2 - Setup: {username}[/bold blue]")
     rprint(f"[cyan]Engine: rclone | Profilo: {profile}[/cyan]")
     rprint(f"[cyan]Quota Nextcloud: {quota} | Sottodomini: {', '.join(subdomains) if subdomains else 'nessuno'}[/cyan]")
+    rprint(f"[cyan]Autenticazione: {auth_mode}[/cyan]")
+    
+    # Validazione auth_mode
+    if auth_mode not in ["bearer", "basic"]:
+        rprint(f"[red]❌ auth-mode non valido: {auth_mode}[/red]")
+        rprint("💡 Valori ammessi: bearer (AppAPI), basic (legacy)")
+        sys.exit(1)
+    
+    use_bearer_token = auth_mode == "bearer"
     
     # Validazione profilo
     from .rclone import MOUNT_PROFILES
@@ -99,7 +109,8 @@ def user(
             password=password,
             quota=quota,
             profile=profile,
-            remount=remount
+            remount=remount,
+            use_bearer_token=use_bearer_token
         )
         
         if success:
@@ -115,6 +126,7 @@ def user(
             rprint(f"[green]• Utente Linux: ✅[/green]")
         rprint(f"[green]• Mount rclone: ✅ (/home/{username})[/green]")
         rprint(f"[green]• Profilo rclone: {profile}[/green]")
+        rprint(f"[green]• Autenticazione: {auth_mode}[/green]")
         if auto_service:
             rprint(f"[green]• Servizio systemd: ✅[/green]")
         rprint(f"[green]• Gestione spazio: ✅ Automatica (rclone cache LRU)[/green]")
@@ -125,6 +137,17 @@ def user(
             rprint(f"\n[bold]🚀 Profilo {profile}:[/bold] {profile_info['description']}")
             rprint(f"[cyan]💾 Cache: {profile_info.get('storage', 'N/A')}[/cyan]")
             rprint(f"[cyan]🔄 Sync: {profile_info.get('sync', 'N/A')}[/cyan]")
+        
+        # Info autenticazione
+        if auth_mode == "bearer":
+            rprint(f"\n[bold]🔐 Autenticazione AppAPI:[/bold]")
+            rprint("[cyan]• Usa App Password generate da Nextcloud[/cyan]")
+            rprint("[cyan]• Compatibile con AppAPI e External Apps[/cyan]")
+            rprint("[cyan]• Accesso completo lettura/scrittura[/cyan]")
+        else:
+            rprint(f"\n[bold]🔐 Autenticazione Legacy:[/bold]")
+            rprint("[cyan]• Usa password utente tradizionale[/cyan]")
+            rprint("[cyan]• Per server senza AppAPI[/cyan]")
         
         rprint(f"\n[bold]🛠️ Prossimi passi:[/bold]")
         rprint(f"cd /home/{username}              # Entra nella home directory")
@@ -150,9 +173,9 @@ def user(
 @setup_app.command()
 def quick(
     username: str = typer.Argument(help="Nome utente (es. ecommerce.it)"),
-    password: str = typer.Argument(help="Password utente")
+    password: str = typer.Argument(help="Password utente o App Password")
 ):
-    """Setup veloce con profilo predefinito (full)"""
+    """Setup veloce con profilo predefinito (full) e bearer token"""
     rprint(f"[bold blue]⚡ Setup veloce per {username}[/bold blue]")
     
     # Usa il comando user con profilo predefinito
@@ -161,6 +184,7 @@ def quick(
         password=password,
         quota="100G",
         profile="full",
+        auth_mode="bearer",
         subdomains=[],
         skip_linux=False,
         skip_test=False,
@@ -171,7 +195,7 @@ def quick(
 
 @setup_app.command()
 def profiles():
-    """Mostra profili rclone disponibili"""
+    """​​Mostra profili rclone disponibili"""
     rprint("[blue]📊 Profili rclone v1.0.0rc2[/blue]")
     
     from .rclone import MOUNT_PROFILES
@@ -205,10 +229,11 @@ def config():
         console.print(table)
         
         # Info v1.0
-        rprint("\n[bold]🎛️ Configurazione v1.0.0rc2:[/bold]")
+        rprint("\n[bold]🏛️ Configurazione v1.0.0rc2:[/bold]")
         rprint("• Engine: rclone (unico)")
         rprint("• Profilo predefinito: full")
         rprint("• Quota predefinita: 100G")
+        rprint("• Auth predefinita: bearer (AppAPI)")
         rprint("• Gestione spazio: automatica via rclone")
         rprint("• Servizio systemd: abilitato")
         
@@ -218,16 +243,24 @@ def config():
         for profile, info in MOUNT_PROFILES.items():
             rprint(f"• {profile}: {info.get('description', 'N/A')}")
         
+        # Metodi autenticazione
+        rprint("\n[bold]🔐 Metodi autenticazione:[/bold]")
+        rprint("• bearer (default): App Password per AppAPI - accesso completo")
+        rprint("• basic (legacy): Password utente tradizionale - server senza AppAPI")
+        
         # Esempi d'uso v1.0
         rprint("\n[bold]💡 Esempi d'uso v1.0.0rc2:[/bold]")
-        rprint("# Setup veloce")
-        rprint("nextcloud-wrapper setup quick domain.com password123")
+        rprint("# Setup veloce con bearer token (AppAPI)")
+        rprint("nextcloud-wrapper setup quick domain.com APP_PASSWORD")
         rprint("")
-        rprint("# Setup con profilo specifico")
-        rprint("nextcloud-wrapper setup user hosting.com pass --profile hosting")
+        rprint("# Setup con profilo specifico e bearer token")
+        rprint("nextcloud-wrapper setup user hosting.com APP_PASSWORD --profile hosting --auth-mode bearer")
         rprint("")
-        rprint("# Setup hosting con sottodomini")  
-        rprint("nextcloud-wrapper setup user site.com pass --profile hosting --sub www,blog,shop")
+        rprint("# Setup con autenticazione legacy (basic auth)")  
+        rprint("nextcloud-wrapper setup user site.com password123 --auth-mode basic")
+        rprint("")
+        rprint("# Setup hosting con sottodomini")
+        rprint("nextcloud-wrapper setup user site.com APP_PASSWORD --profile hosting --sub www,blog,shop")
         
     except Exception as e:
         rprint(f"[red]❌ Errore configurazione: {e}[/red]")
@@ -251,20 +284,22 @@ def migrate():
     rprint("• ✅ Setup one-command semplificato")
     rprint("• ✅ Gestione spazio automatica")
     rprint("• ✅ Performance superiori")
+    rprint("• ✅ Supporto bearer token per AppAPI")
     
     rprint("\n[bold]🚀 Migrazione automatica:[/bold]")
     rprint("1. I dati Nextcloud rimangono INTATTI")
     rprint("2. Setup utenti può essere rifatto identico:")
-    rprint("   nextcloud-wrapper setup user username password --profile full")
+    rprint("   nextcloud-wrapper setup user username APP_PASSWORD --profile full")
     rprint("3. Zero configurazioni - tutto automatico!")
     
     rprint("\n[bold]🎯 Vantaggi v1.0.0rc2:[/bold]")
     rprint("• 💾 Gestione spazio: 100% automatica")
     rprint("• ⚡ Performance: 5x superiori")
     rprint("• 🔧 Manutenzione: -70% complessità")
-    rprint("• 🎛️ Setup: un comando unico")
+    rprint("• 🏛️ Setup: un comando unico")
+    rprint("• 🔐 AppAPI: bearer token nativo")
     
-    rprint("\n[bold green]🎉 Un engine, quattro profili, zero configurazioni![/bold green]")
+    rprint("\n[bold green]🎉 Un engine, quattro profili, due metodi auth, zero configurazioni![/bold green]")
 
 
 if __name__ == "__main__":

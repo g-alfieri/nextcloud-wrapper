@@ -98,7 +98,7 @@ def ensure_config():
         RCLONE_CONF.write_text("")
 
 
-def add_nextcloud_remote(name: str, base_url: str, username: str, password: str) -> bool:
+def add_nextcloud_remote(name: str, base_url: str, username: str, password: str, use_bearer_token: bool = True) -> bool:
     """
     Aggiunge un remote Nextcloud WebDAV a rclone
     
@@ -106,7 +106,8 @@ def add_nextcloud_remote(name: str, base_url: str, username: str, password: str)
         name: Nome del remote
         base_url: URL base Nextcloud (es. https://cloud.example.com)
         username: Username Nextcloud
-        password: Password Nextcloud
+        password: Password Nextcloud o App Password/Bearer Token
+        use_bearer_token: Se True usa bearer_token (AppAPI), altrimenti user/pass (default: True)
         
     Returns:
         True se aggiunto con successo
@@ -119,12 +120,18 @@ def add_nextcloud_remote(name: str, base_url: str, username: str, password: str)
         # Verifica connettività prima di creare il remote
         print(f"🔍 Test connettività: {webdav_url}")
         
-        # Test con curl prima
+        # Test con curl prima (adatta per bearer token o basic auth)
         import subprocess
-        curl_test = subprocess.run([
-            "curl", "-s", "-u", f"{username}:{password}", 
-            "-X", "PROPFIND", webdav_url
-        ], capture_output=True, text=True)
+        if use_bearer_token:
+            curl_test = subprocess.run([
+                "curl", "-s", "-H", f"Authorization: Bearer {password}", 
+                "-X", "PROPFIND", webdav_url
+            ], capture_output=True, text=True)
+        else:
+            curl_test = subprocess.run([
+                "curl", "-s", "-u", f"{username}:{password}", 
+                "-X", "PROPFIND", webdav_url
+            ], capture_output=True, text=True)
         
         if curl_test.returncode != 0:
             print(f"❌ Test connettività curl fallito: {curl_test.stderr}")
@@ -132,17 +139,31 @@ def add_nextcloud_remote(name: str, base_url: str, username: str, password: str)
         
         print(f"✅ Connettività WebDAV verificata")
         
-        # Crea il remote rclone
-        cmd = [
-            "rclone", "config", "create", name, "webdav",
-            f"url={webdav_url}",
-            f"user={username}",
-            f"pass={password}",
-            "vendor=nextcloud",
-            "--config", str(RCLONE_CONF)
-        ]
+        # Crea il remote rclone con supporto sia Basic Auth che Bearer Token
+        if use_bearer_token:
+            # AppAPI compatibility - usa bearer_token
+            cmd = [
+                "rclone", "config", "create", name, "webdav",
+                f"url={webdav_url}",
+                f"bearer_token={password}",
+                "vendor=nextcloud",
+                "--config", str(RCLONE_CONF)
+            ]
+            print(f"🔐 Usando bearer_token authentication (AppAPI compatible)")
+            print(f"Comando rclone: {' '.join(cmd[:6])}...")  # Non mostrare token
+        else:
+            # Basic Auth tradizionale - usa user/pass
+            cmd = [
+                "rclone", "config", "create", name, "webdav",
+                f"url={webdav_url}",
+                f"user={username}",
+                f"pass={password}",
+                "vendor=nextcloud",
+                "--config", str(RCLONE_CONF)
+            ]
+            print(f"🔐 Usando basic authentication (legacy mode)")
+            print(f"Comando rclone: {' '.join(cmd[:7])}...")  # Non mostrare password
         
-        print(f"Comando rclone: {' '.join(cmd[:7])}...")  # Non mostrare password
         run(cmd)
         
         # Test il remote appena creato
